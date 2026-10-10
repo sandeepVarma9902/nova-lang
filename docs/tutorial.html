@@ -142,11 +142,11 @@ print(p == Point(x: 1.0, y: 2.0))   // true — structural equality built in</co
 <p><strong>Notice:</strong> <code>let</code> fields are assigned once in <code>init</code>. Methods are pure unless marked <code>effect</code>. <code>data class</code> gives you fields, construction, <code>==</code>, and a readable print — the mechanical parts of a POJO without the boilerplate.</p>
 <p><strong>Analogy:</strong> <code>data class</code> ≈ Java <code>record</code>, but with structural <code>==</code> out of the box. <code>interface</code>/<code>implements</code>/<code>extends</code> work exactly like Java.</p>
 <h2>(f) Modules + <code>nova lock</code></h2>
-<pre><code class="language-nova">// nova_helpers.nova
+<pre><code class="language-nova" data-norun="1">// nova_helpers.nova
 fn greet(name: String) -&gt; String {
   return &quot;Hello, &quot; + name + &quot;!&quot;
 }</code></pre>
-<pre><code class="language-nova">// app.nova (entry)
+<pre><code class="language-nova" data-norun="1">// app.nova (entry)
 import nova_helpers
 print(nova_helpers.greet(&quot;Ada&quot;))   // namespaced — no classpath, no collisions</code></pre>
 <p><code>_private</code> names (leading underscore) are invisible outside their module — <code>E_IMPORT</code> if you try. Then pin the supply chain:</p>
@@ -160,22 +160,22 @@ nova run --locked app.nova  # refuses to run if anything was tampered with</code
   return fib(n - 1) + fib(n - 2)
 }
 
-effect fn main() {
-  // CPU-bound -&gt; parallel: spawn runs on a worker thread
-  let t = spawn { fib(30) }
-
-  // IO-bound -&gt; async: coordinate with await
-  async fn doubleAll(xs: List[Int]) -&gt; List[Int] {
-    let out: List[Int] = []
-    for x in xs {
-      let s = spawn { x * 2 }
-      out.push(s.await())
-    }
-    return out
+// IO-bound -&gt; async: coordinate with await
+async fn doubleAll(xs: List[Int]) -&gt; List[Int] {
+  let out: List[Int] = []
+  for x in xs {
+    let s = spawn { x * 2 }
+    out.push(s.await())
   }
+  return out
+}
 
-  print(t.await())
-}</code></pre>
+// CPU-bound -&gt; parallel: spawn runs on a worker thread
+let t = spawn { fib(20) }
+print(t.await())
+
+// IO-bound -&gt; async: coordinate with await
+print(doubleAll([1, 2, 3]))</code></pre>
 <p><strong>The rule the compiler enforces:</strong></p>
 <table><thead><tr><th>Workload</th><th>Construct</th></tr></thead><tbody><tr><td>IO-bound (fetch, read, AI calls)</td><td><code>async fn</code> + <code>await</code></td></tr><tr><td>CPU-bound (fib, image ops, parsing)</td><td><code>spawn { }</code> worker pool</td></tr></tbody></table>
 <p><strong>Notice:</strong> Calling blocking IO <em>directly</em> inside an <code>async fn</code> is a compile error — <code>E_ASYNC_BLOCKING</code> (&quot;wrap it in <code>spawn { }</code>&quot;). This is Nova teaching you the architecture: the async function would stall the event loop. <code>?</code> may not appear directly in a <code>spawn</code> block (<code>E_QUESTION</code>) — handle <code>Result</code> with <code>match</code> inside the task.</p>
@@ -190,7 +190,8 @@ effect fn main() {
     Some(msg) =&gt; print(msg.value),
     None =&gt; print(&quot;(empty)&quot;)
   }
-}</code></pre>
+}
+main()</code></pre>
 <h2>(h) ai fn + secret + app.nova + build/deploy — 5 minutes</h2>
 <pre><code class="language-nova">// The return TYPE is the output schema — the provider must conform to it.
 data class Summary(headline: String, score: Float)
@@ -202,17 +203,18 @@ ai fn summarize(text: String) -&gt; Summary
   prompt(&quot;Summarize in one sentence: &quot; + text)
 }
 
-effect fn run() {
+effect net fn run(net: Net) {
   let s = summarize(&quot;Nova is an AI-native language.&quot;)
   print(s.headline)
-}</code></pre>
-<p><strong>Notice:</strong> v1 runs against a deterministic <strong>mock provider</strong> — no network, no key, reproducible output. <code>ai fn</code> has <code>net</code> effect: from <code>async</code> code, spawn-wrap it like any network IO. <code>prompt(...)</code> is mandatory in the body (<code>R_AI_NO_PROMPT</code> otherwise).</p>
+}
+run(net)</code></pre>
+<p><strong>Notice:</strong> v1 runs against a deterministic <strong>mock provider</strong> — no network, no key, reproducible output. <code>ai fn</code> has <code>net</code> effect, so the caller needs <code>effect net</code> and a <code>Net</code> capability: from <code>async</code> code, spawn-wrap it like any network IO. <code>prompt(...)</code> is mandatory in the body (<code>R_AI_NO_PROMPT</code> otherwise).</p>
 <p><strong>Secrets</strong> are named, never in source:</p>
 <pre><code class="language-nova">effect io fn dbPass(io: IO) -&gt; Result[String, String] {
   return secret(&quot;db-password&quot;, io)   // resolves NOVA_SECRET_DB_PASSWORD at runtime
 }</code></pre>
 <p><strong>Manifest</strong> — <code>app.nova</code> sits next to your entry file:</p>
-<pre><code class="language-nova">app &quot;myapp&quot; {
+<pre><code class="language-nova" data-norun="1">app &quot;myapp&quot; {
   version = &quot;0.1.0&quot;
   entry = &quot;main.nova&quot;
   threading = &quot;auto&quot;              // single | multi | auto
@@ -228,7 +230,7 @@ nova deploy --target docker   # docker build of the staged image</code></pre>
 <h2>(i) Naming conventions — 2 minutes</h2>
 <p>Nova takes its naming from the two languages it fuses: types look like Java, functions look like JavaScript. One rule per kind of name — no code-review debates.</p>
 <table><thead><tr><th>Name kind</th><th>Style</th><th>Example</th></tr></thead><tbody><tr><td>Classes, interfaces, enums, data classes</td><td>PascalCase</td><td><code>User</code>, <code>HttpRequest</code></td></tr><tr><td>Components</td><td>PascalCase</td><td><code>UserCard</code>, <code>Counter</code></td></tr><tr><td>Functions, methods</td><td>camelCase</td><td><code>getUser</code>, <code>calculateTotal</code></td></tr><tr><td>Variables, parameters</td><td>camelCase</td><td><code>userName</code>, <code>retryCount</code></td></tr><tr><td>Module-level constants</td><td>SCREAMING_SNAKE_CASE</td><td><code>MAX_RETRIES</code>, <code>DEFAULT_PORT</code></td></tr><tr><td>Type parameters</td><td>single capital letter</td><td><code>T</code>, <code>E</code>, <code>K</code>, <code>V</code></td></tr><tr><td>Module files</td><td>snake_case</td><td><code>helpers.nova</code> → <code>import helpers</code></td></tr><tr><td>Test files</td><td><code>*_test.nova</code></td><td><code>user_test.nova</code> (found by <code>nova test</code>)</td></tr></tbody></table>
-<pre><code class="language-nova">// ✅ Do
+<pre><code class="language-nova" data-norun="1">// ✅ Do
 class UserService { ... }
 component UserCard(user: User) { ... }
 fn getUser(id: Int) -&gt; Option[User] { ... }
@@ -261,8 +263,8 @@ let MAX = 3                    // screaming case is for constants only</code></p
   <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
   <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
 </footer>
-<script src="../js/main.js?v=4"></script>
-<script src="../js/nova-live.js?v=4"></script>
-<script src="../js/runnable.js?v=4"></script>
+<script src="../js/main.js?v=5"></script>
+<script src="../js/nova-live.js?v=5"></script>
+<script src="../js/runnable.js?v=5"></script>
 </body>
 </html>

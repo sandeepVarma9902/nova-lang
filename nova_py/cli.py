@@ -221,6 +221,11 @@ USAGE = """usage: nova <command> [options] <file>
   nova eval <suite.json> [--provider mock|http] [--out report.json]
                                 eval harness: prompts -> predicates -> JSON
   nova lsp                      EXPERIMENTAL LSP server (JSON-RPC over stdio)
+  nova db pull --dsn sqlite:///app.db [--out models.nova]
+                                inspect schema -> Nova model types
+  nova data export --from sqlite:///app.db --query "SELECT ..." --format jsonl
+                                export fine-tuning datasets (see docs/ai-training.md)
+  nova test [dir]               discover *_test.nova, run assertions, report
   nova deploy [--target local|docker|aws|gcp] [--env NAME] [--manifest app.nova]
 """
 
@@ -482,6 +487,178 @@ def cmd_lsp(args):
     return 0
 
 
+def cmd_db(args):
+    # nova db pull --dsn sqlite:///app.db [--out models.nova]
+    if not args or args[0] != "pull":
+        sys.stderr.write("usage: nova db pull --dsn sqlite:///app.db "
+                         "[--out models.nova]\n")
+        return 2
+    dsn = None
+    out = "models.nova"
+    i = 1
+    while i < len(args):
+        if args[i] == "--dsn" and i + 1 < len(args):
+            dsn = args[i + 1]
+            i += 2
+        elif args[i] == "--out" and i + 1 < len(args):
+            out = args[i + 1]
+            i += 2
+        else:
+            i += 1
+    if not dsn:
+        sys.stderr.write("nova db pull needs --dsn sqlite:///<path>\n")
+        return 2
+    from .db import pull_sqlite, DbError
+    try:
+        tables = pull_sqlite(dsn, out)
+    except DbError as e:
+        sys.stderr.write("db pull failed: %s\n" % e)
+        return 1
+    schema_path = os.path.join(os.path.dirname(os.path.abspath(out)),
+                               ".nova-schema.json")
+    print("pulled %d table(s) -> %s (+ %s)"
+          % (len(tables), out, schema_path))
+    return 0
+
+
+def cmd_data(args):
+    # nova data export --from sqlite:///app.db --query "SELECT ..."     #     --format jsonl [--out out.jsonl]
+    # Produces fine-tuning datasets. Training happens outside Nova;
+    # see docs/ai-training.md for the full loop.
+    if not args or args[0] != "export":
+        sys.stderr.write(
+            "usage: nova data export --from sqlite:///app.db "
+            '--query "SELECT ..." --format jsonl [--out out.jsonl]\n')
+        return 2
+    dsn = query = out = None
+    fmt = "jsonl"
+    i = 1
+    while i < len(args):
+        if args[i] == "--from" and i + 1 < len(args):
+            dsn = args[i + 1]
+            i += 2
+        elif args[i] == "--query" and i + 1 < len(args):
+            query = args[i + 1]
+            i += 2
+        elif args[i] == "--format" and i + 1 < len(args):
+            fmt = args[i + 1]
+            i += 2
+        elif args[i] == "--out" and i + 1 < len(args):
+            out = args[i + 1]
+            i += 2
+        else:
+            i += 1
+    if not dsn or not query:
+        sys.stderr.write("nova data export needs --from and --query\n")
+        return 2
+    if fmt != "jsonl":
+        sys.stderr.write("unsupported format '%s' — only jsonl\n" % fmt)
+        return 2
+    import json as _json
+    import sqlite3
+    from .db import parse_dsn, DbError
+    try:
+        driver, path = parse_dsn(dsn)
+    except DbError as e:
+        sys.stderr.write("data export failed: %s\n" % e)
+        return 1
+    if driver != "sqlite":
+        sys.stderr.write("data export failed: only sqlite is supported\n")
+        return 1
+    try:
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        rows = [dict(r) for r in conn.execute(query).fetchall()]
+    except Exception as e:
+        sys.stderr.write("query failed: %s\n" % e)
+        return 1
+    lines = [_json.dumps(r, separators=(",", ":")) for r in rows]
+    if out:
+        with open(out, "w") as fh:
+            fh.write("\n".join(lines) + ("\n" if lines else ""))
+        print("exported %d row(s) -> %s (jsonl)" % (len(rows), out))
+    else:
+        sys.stdout.write("\n".join(lines) + ("\n" if lines else ""))
+    return 0
+
+
+def cmd_test(args):
+    # nova test [dir] — discover *_test.nova, run test_* fns + top-level
+    # asserts, report per file.
+    import glob
+    root = args[0] if args and not args[0].startswith("--") else "."
+    files = sorted(glob.glob(os.path.join(root, "**", "*_test.nova"),
+                             recursive=True))
+    if not files:
+        print("no *_test.nova files found under %s" % root)
+        return 0
+    from .interpreter import Interpreter, NovaError, TOP_EFF, FuncValue
+    from . import ast as A
+    total = passed = failed = 0
+    failures = []
+    for path in files:
+        # check first
+        from .checker import check_source
+        with open(path) as fh:
+            src = fh.read()
+        _, diags = check_source(src, path,
+                                os.path.dirname(os.path.abspath(path)),
+                                is_entry=True)
+        errs = diags  # check_source only reports errors
+        if errs:
+            failed += 1
+            failures.append((path, None,
+                             "; ".join("%s: %s" % (d.code, d.message)
+                                       for d in errs[:3])))
+            print("FAIL %s (check: %d error(s))" % (path, len(errs)))
+            continue
+        # run the program (top-level asserts execute here)
+        from .lexer import Lexer
+        from .parser import Parser
+        basedir = os.path.dirname(os.path.abspath(path))
+        prog = Parser(Lexer(src, path).tokenize(), src, path).parse_program()
+        interp = Interpreter(basedir, is_entry=True)
+        try:
+            interp.run(prog, path)
+        except NovaError as e:
+            failed += 1
+            failures.append((path, None, "%s: %s" % (e.code, e)))
+            print("FAIL %s (%s)" % (path, e.code))
+            continue
+        # then each test_* function
+        test_fns = [(n, c.value)
+                    for n, c in interp.global_env.cells.items()
+                    if n.startswith("test_")
+                    and isinstance(c.value, FuncValue)]
+        file_ok = True
+        for tname, fv in sorted(test_fns):
+            total += 1
+            saved = interp.fx
+            interp.fx = TOP_EFF
+            try:
+                interp.call_fn(fv, [], A.Node(), "test")
+                passed += 1
+            except NovaError as e:
+                file_ok = False
+                failures.append((path, tname, "%s: %s" % (e.code, e)))
+            finally:
+                interp.fx = saved
+        if file_ok and not test_fns:
+            total += 1
+            passed += 1  # top-level asserts only
+        if file_ok:
+            print("ok   %s (%d test(s))" % (path, len(test_fns) or 1))
+        else:
+            failed += 1
+            print("FAIL %s" % path)
+    print("----")
+    print("%d passed, %d failed, %d files" % (passed, failed, len(files)))
+    for path, tname, msg in failures:
+        where = "%s::%s" % (path, tname) if tname else path
+        print("  FAIL %s: %s" % (where, msg))
+    return 1 if failed else 0
+
+
 def main(argv):
     if len(argv) < 2:
         sys.stderr.write(USAGE)
@@ -521,5 +698,11 @@ def main(argv):
         return cmd_eval(argv[2:])
     if cmd == "lsp":
         return cmd_lsp(argv[2:])
+    if cmd == "db":
+        return cmd_db(argv[2:])
+    if cmd == "data":
+        return cmd_data(argv[2:])
+    if cmd == "test":
+        return cmd_test(argv[2:])
     sys.stderr.write(USAGE)
     return 2

@@ -14,7 +14,8 @@
 
   function offlineReason() {
     var err = window.NovaLive && window.NovaLive.lastError;
-    return OFFLINE_HINT + (err ? " (" + err + ")" : "");
+    if (err && window.console) console.warn("[nova] live run failed:", err);
+    return OFFLINE_HINT + ".";
   }
 
   function esc(s) {
@@ -172,6 +173,7 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     document.querySelectorAll("pre code.language-nova").forEach(function (code) {
+      if (code.hasAttribute("data-norun")) return; // illustrative only
       var pre = code.closest("pre");
       if (!pre || pre.dataset.nvDone) return;
       pre.dataset.nvDone = "1";

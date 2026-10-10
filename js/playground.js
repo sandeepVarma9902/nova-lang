@@ -84,8 +84,9 @@
         setStatus("&#9679; <strong>Live</strong> &mdash; running the real Nova interpreter in your browser.", "ok");
         renderOutput();
       } else {
-        staticMode("could not start the in-browser interpreter (" +
-          String(window.NovaLive.lastError || "unknown").replace(/</g, "&lt;") + ").");
+        var err = window.NovaLive.lastError || "unknown";
+        if (window.console) console.warn("[nova] live run failed:", err);
+        staticMode("could not start the in-browser interpreter.");
       }
     });
   }

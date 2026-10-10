@@ -11,7 +11,9 @@ from .types import (Type, PrimType, INT, FLOAT, STRING, BOOL, UNIT, ANY,
                     ListType, OptionType, ResultType, ClassType,
                     InterfaceType, ComponentType, InstanceType, ModuleType,
                     TaskType, StreamType, SubscriptionType, MessageType,
-                    is_subtype, ClassInfo)
+                    JsonType, VectorType, RequestType, ResponseType,
+                    RouterType, DbType, QueryType, JSON, REQUEST, RESPONSE,
+                    ROUTER, DB, is_subtype, ClassInfo)
 
 INT_MIN = -(2 ** 63)
 INT_MAX = 2 ** 63 - 1
@@ -32,7 +34,8 @@ EFFECT_OF = {"pure": PURE, "effect": CONSOLE, "io": IO_EFF, "net": NET_EFF,
              "async net": ASYNC_NET_EFF}
 
 # builtins that block the calling thread: forbidden directly inside async fns
-BLOCKING_BUILTINS = {"readFile", "writeFile", "fetch"}
+BLOCKING_BUILTINS = {"readFile", "writeFile", "fetch", "serve",
+                     "dbOpen", "dbExec"}
 
 BANNED_IDENTS = {"null", "nil", "undefined"}
 
@@ -176,6 +179,31 @@ class Checker:
         if name == "Message":
             self._n_args(tnode, name, 1)
             return MessageType(self.resolve_type(args[0]))
+        if name == "Json":
+            self._no_args(tnode, name)
+            return JSON
+        if name == "Vector":
+            if len(args) != 1 or not isinstance(args[0], A.ConstTypeArg):
+                self.error("E_TYPE_ARGS",
+                           "Vector needs a constant dimension, e.g. "
+                           "Vector[1536]", tnode)
+                return VectorType(0)
+            return VectorType(args[0].value)
+        if name == "Request":
+            self._no_args(tnode, name)
+            return REQUEST
+        if name == "Response":
+            self._no_args(tnode, name)
+            return RESPONSE
+        if name == "Router":
+            self._no_args(tnode, name)
+            return ROUTER
+        if name == "Db":
+            self._no_args(tnode, name)
+            return DB
+        if name == "Query":
+            self._no_args(tnode, name)
+            return QueryType(None)
         if name in CAP_TYPES:
             self._no_args(tnode, name)
             return _Cap(name)
@@ -325,8 +353,11 @@ class Checker:
         sub.func_sigs = self.func_sigs
         sub.check_program(prog)
         self.errors.extend(sub.errors)
-        self.modules[node.name] = sub.exports()
-        self.global_scope.define(Symbol(node.name, ModuleType(node.name),
+        # Dotted imports are visible under their last segment:
+        # `import std.web` is used as `web.ok(...)`.
+        local = node.name.split("/")[-1]
+        self.modules[local] = sub.exports()
+        self.global_scope.define(Symbol(local, ModuleType(local),
                                         "module", mutable=False))
 
     # -- functions ----------------------------------------------------
@@ -365,8 +396,10 @@ class Checker:
 
     def check_ai_schema(self, t, node):
         # Output schema must be mockable/serializable: primitives, data
-        # classes, lists/options of those.
+        # classes, vectors, lists/options of those.
         if isinstance(t, (type(INT),)):
+            return
+        if isinstance(t, VectorType):
             return
         if isinstance(t, ListType):
             self.check_ai_schema(t.elem, node)
@@ -1343,7 +1376,15 @@ class Checker:
                 return InstanceType(name)
             if name in ("print", "str", "int", "len", "assert", "render",
                         "readFile", "writeFile", "fetch", "prompt",
-                        "secret", "sleep"):
+                        "secret", "sleep", "jsonParse", "toJson", "jsonGet",
+                        "jsonStr", "jsonInt", "jsonFloat", "jsonBool",
+                        "jsonList", "router", "route", "use", "staticDir",
+                        "serve", "response", "jsonResponse", "reqMethod",
+                        "reqPath", "reqBody", "reqJson", "param", "paramInt",
+                        "query", "header", "env", "parseInt", "parseFloat",
+                        "similarity", "topK", "dbOpen", "dbTable", "dbExec",
+                        "get", "post", "put", "delete", "patch",
+                        "redirect"):
                 return self._check_builtin(name, node, scope)
             if sym is None:
                 self.error("E_UNDEFINED", "undefined name '%s'" % name, func)
@@ -1399,7 +1440,138 @@ class Checker:
         self.check_call_args(params, node.args, node, what="init of " + name)
         return ClassType(name)
 
+    def _str_literal(self, expr):
+        # Best-effort: the string value if expr is a string literal.
+        if isinstance(expr, A.StrLit):
+            return expr.value
+        return None
+
+    def _db_schema(self):
+        # Best-effort schema for check-time validation: .nova-schema.json
+        # written by `nova db pull` next to the entry file. Cached.
+        if hasattr(self, "_schema_cache"):
+            return self._schema_cache
+        import json as _json
+        import os as _os
+        schema = None
+        cand = _os.path.join(self.basedir, ".nova-schema.json")
+        if _os.path.isfile(cand):
+            try:
+                with open(cand) as fh:
+                    schema = _json.load(fh)
+            except Exception:
+                schema = None
+        self._schema_cache = schema
+        return schema
+
+    def _check_db_table(self, table, node):
+        schema = self._db_schema()
+        if schema is None:
+            return  # best effort: no schema file, no check
+        if table not in schema.get("tables", {}):
+            known = ", ".join(sorted(schema["tables"])) or "(none)"
+            self.error("E_DB_SCHEMA",
+                       "unknown table '%s'" % table, node,
+                       hint="known tables: %s (from .nova-schema.json; "
+                            "refresh with `nova db pull`)" % known)
+
+    def _check_db_column(self, table, column, node):
+        schema = self._db_schema()
+        if schema is None or table is None:
+            return  # best effort
+        cols = schema.get("tables", {}).get(table)
+        if cols is None:
+            return
+        if column not in cols:
+            self.error("E_DB_SCHEMA",
+                       "unknown column '%s' on table '%s'" % (column, table),
+                       node,
+                       hint="known columns: %s"
+                       % ", ".join(sorted(cols)))
+
+    def _check_handler_builtin(self, name, node, scope):
+        # route(router, method, path, handler, io) -> Unit
+        # use(router, middleware) -> Unit
+        # get/post/put/delete/patch(router, path, handler, io) -> Unit
+        # The handler is a bare function name; validate its FuncSig.
+        is_route = name == "route" or name in self._METHOD_SHORTHANDS
+        if name in self._METHOD_SHORTHANDS:
+            want, hidx = 4, 2
+        elif name == "route":
+            want, hidx = 5, 3
+        else:
+            want, hidx = 2, 1
+        if len(node.args) != want:
+            self.error("E_ARGC",
+                       "%s takes %d arguments" % (name, want), node)
+            return UNIT
+        for i, (aname, aexpr) in enumerate(node.args):
+            if i == hidx:
+                continue
+            self.check_expr(aexpr, scope)
+        hexpr = node.args[hidx][1]
+        if not isinstance(hexpr, A.Var):
+            self.error("E_TYPE_MISMATCH",
+                       "%s handler must be a named function" % name, hexpr)
+            return UNIT
+        sym = scope.lookup(hexpr.name)
+        if sym is None or not isinstance(sym.type, FuncSig):
+            self.error("E_UNDEFINED",
+                       "'%s' is not a function" % hexpr.name, hexpr)
+            return UNIT
+        sig = sym.type
+        if len(sig.params) != 1 or sig.params[0][1] != REQUEST:
+            self.error("E_TYPE_MISMATCH",
+                       "%s handler '%s' must take (req: Request)"
+                       % (name, sig.name), hexpr,
+                       hint="e.g. `effect fn %s(req: Request) -> Response`"
+                       % sig.name)
+            return UNIT
+        if is_route:
+            ok_ret = (sig.ret == RESPONSE
+                      or (isinstance(sig.ret, ResultType)
+                          and sig.ret.ok == RESPONSE))
+            want_ret = ("Response, or Result[Response, Response] "
+                        "(Err serves that HTTP response), "
+                        "or Result[Response, _] (Err becomes a 500)")
+        else:
+            ok_ret = (isinstance(sig.ret, OptionType)
+                      and sig.ret.elem == RESPONSE)
+            want_ret = "Option[Response] (Some to short-circuit, None to continue)"
+        if not ok_ret:
+            self.error("E_TYPE_MISMATCH",
+                       "%s handler '%s' must return %s, got %s"
+                       % (name, sig.name, want_ret, sig.ret), hexpr)
+            return UNIT
+        if not (set(sig.effect) & {"console", "io", "net"}):
+            self.error("E_EFFECT",
+                       "%s handler '%s' must be declared `effect` (it runs "
+                       "IO)" % (name, sig.name), hexpr)
+            return UNIT
+        if is_route:
+            # Validate the path pattern at check time when literal.
+            pexpr = node.args[2 if name == "route" else 1][1]
+            pat = self._str_literal(pexpr)
+            if pat is not None:
+                from .web import parse_route_pattern, RoutePatternError
+                try:
+                    parse_route_pattern(pat)
+                except RoutePatternError as e:
+                    self.error("E_ROUTE",
+                               "bad route pattern '%s': %s" % (pat, e),
+                               pexpr,
+                               hint="e.g. /users/{id: Int}")
+        return UNIT
+
+    _METHOD_SHORTHANDS = {"get": "GET", "post": "POST", "put": "PUT",
+                          "delete": "DELETE", "patch": "PATCH"}
+
     def _check_builtin(self, name, node, scope):
+        if name in ("route", "use") or name in self._METHOD_SHORTHANDS:
+            # The handler/middleware argument is a bare function name.
+            # check_expr would reject it (E_NOT_VALUE), so validate the
+            # FuncSig directly instead.
+            return self._check_handler_builtin(name, node, scope)
         args = node.args
         vals = [self.check_expr(a[1], scope) for a in args]
         if (name in BLOCKING_BUILTINS and self.in_async_fn
@@ -1413,6 +1585,148 @@ class Checker:
         if name == "print":
             self._need_effect(CONSOLE, node, "print")
             return UNIT
+        # -- JSON --------------------------------------------------
+        if name == "jsonParse":
+            self._check_arg_types(name, [STRING], vals, args, node)
+            return ResultType(JSON, STRING)
+        if name == "toJson":
+            if len(vals) != 1:
+                self.error("E_ARGC", "toJson takes 1 argument", node)
+            return STRING
+        if name == "jsonGet":
+            self._check_arg_types(name, [JSON, STRING], vals, args, node)
+            return OptionType(JSON)
+        if name == "jsonStr":
+            self._check_arg_types(name, [JSON], vals, args, node)
+            return OptionType(STRING)
+        if name == "jsonInt":
+            self._check_arg_types(name, [JSON], vals, args, node)
+            return OptionType(INT)
+        if name == "jsonFloat":
+            self._check_arg_types(name, [JSON], vals, args, node)
+            return OptionType(FLOAT)
+        if name == "jsonBool":
+            self._check_arg_types(name, [JSON], vals, args, node)
+            return OptionType(BOOL)
+        if name == "jsonList":
+            self._check_arg_types(name, [JSON], vals, args, node)
+            return OptionType(ListType(JSON))
+        # -- misc --------------------------------------------------
+        if name == "env":
+            self._check_arg_types(name, [STRING], vals, args, node)
+            return OptionType(STRING)
+        if name == "parseInt":
+            self._check_arg_types(name, [STRING], vals, args, node)
+            return OptionType(INT)
+        if name == "parseFloat":
+            self._check_arg_types(name, [STRING], vals, args, node)
+            return OptionType(FLOAT)
+        # -- vectors (RAG-native) ----------------------------------
+        if name == "similarity":
+            if len(vals) != 2:
+                self.error("E_ARGC", "similarity takes 2 arguments", node)
+                return FLOAT
+            for v, a in zip(vals, args):
+                if not isinstance(v, VectorType):
+                    self.error("E_TYPE_MISMATCH",
+                               "similarity needs Vectors, got %s" % v,
+                               a[1])
+            if (isinstance(vals[0], VectorType)
+                    and isinstance(vals[1], VectorType)
+                    and vals[0].dim != vals[1].dim):
+                self.error("E_TYPE_MISMATCH",
+                           "vector dimensions differ: %s vs %s"
+                           % (vals[0], vals[1]), node)
+            return FLOAT
+        if name == "topK":
+            if len(vals) != 3:
+                self.error("E_ARGC", "topK takes 3 arguments", node)
+                return ListType(INT)
+            q, vecs, k = vals
+            if not isinstance(q, VectorType):
+                self.error("E_TYPE_MISMATCH",
+                           "topK query must be a Vector, got %s" % q,
+                           args[0][1] if args else node)
+            if not (isinstance(vecs, ListType)
+                    and isinstance(vecs.elem, VectorType)):
+                self.error("E_TYPE_MISMATCH",
+                           "topK needs List[Vector[N]], got %s" % vecs,
+                           args[1][1] if len(args) > 1 else node)
+            else:
+                self.check_compatible(INT, k if len(vals) > 2 else ANY,
+                                      args[2][1] if len(args) > 2 else node,
+                                      "topK k")
+            return ListType(INT)
+        # -- Nova Boot ---------------------------------------------
+        if name == "router":
+            if vals:
+                self.error("E_ARGC", "router takes no arguments", node)
+            return ROUTER
+        if name == "staticDir":
+            self._check_arg_types(name, [ROUTER, STRING, STRING], vals,
+                                  args, node)
+            return UNIT
+        if name == "serve":
+            self._need_effect(IO_EFF, node, "serve")
+            self._check_arg_types(name, [ROUTER, INT, _Cap("IO")], vals,
+                                  args, node)
+            return ResultType(UNIT, STRING)
+        if name == "response":
+            self._check_arg_types(name, [INT, STRING, STRING], vals, args,
+                                  node)
+            return RESPONSE
+        if name == "redirect":
+            self._check_arg_types(name, [STRING], vals, args, node)
+            return RESPONSE
+        if name == "jsonResponse":
+            if len(vals) != 2:
+                self.error("E_ARGC", "jsonResponse takes 2 arguments",
+                           node)
+            elif vals:
+                self.check_compatible(INT, vals[0], args[0][1],
+                                      "jsonResponse status")
+            return RESPONSE
+        if name == "reqMethod":
+            self._check_arg_types(name, [REQUEST], vals, args, node)
+            return STRING
+        if name == "reqPath":
+            self._check_arg_types(name, [REQUEST], vals, args, node)
+            return STRING
+        if name == "reqBody":
+            self._check_arg_types(name, [REQUEST], vals, args, node)
+            return STRING
+        if name == "reqJson":
+            self._check_arg_types(name, [REQUEST], vals, args, node)
+            return ResultType(JSON, STRING)
+        if name == "param":
+            self._check_arg_types(name, [REQUEST, STRING], vals, args, node)
+            return OptionType(STRING)
+        if name == "paramInt":
+            self._check_arg_types(name, [REQUEST, STRING], vals, args, node)
+            return OptionType(INT)
+        if name == "query":
+            self._check_arg_types(name, [REQUEST, STRING], vals, args, node)
+            return OptionType(STRING)
+        if name == "header":
+            self._check_arg_types(name, [REQUEST, STRING], vals, args, node)
+            return OptionType(STRING)
+        # -- database ----------------------------------------------
+        if name == "dbOpen":
+            self._need_effect(IO_EFF, node, "dbOpen")
+            self._check_arg_types(name, [STRING, _Cap("IO")], vals, args,
+                                  node)
+            return ResultType(DB, STRING)
+        if name == "dbTable":
+            self._check_arg_types(name, [DB, STRING], vals, args, node)
+            table = self._str_literal(args[1][1]) if len(args) > 1 else None
+            if table is not None:
+                self._check_db_table(table, args[1][1])
+            return QueryType(table)
+        if name == "dbExec":
+            self._need_effect(CONSOLE, node, "dbExec")
+            self._check_arg_types(name, [DB, STRING, _Cap("IO")], vals,
+                                  args, node)
+            return ResultType(INT, STRING)
         if name == "str":
             if len(vals) != 1:
                 self.error("E_ARGC", "str takes 1 argument", node)
@@ -1539,6 +1853,76 @@ class Checker:
             self.error("E_ARGC", "%s missing arguments: %s"
                        % (what, ", ".join(missing)), node)
 
+    def _check_query_method(self, ot, node, scope):
+        # Fluent query builder. Column names are validated against
+        # .nova-schema.json when it exists and the table/column are
+        # string literals (best effort — dynamic names skip the check).
+        name = node.name
+        args = node.args
+        table = ot.table
+        if name == "select":
+            if len(args) != 1 or args[0][0] is not None:
+                self.error("E_ARGC", "select takes a List[String]", node)
+                return QueryType(table)
+            ct = self.check_expr(args[0][1], scope)
+            if not (isinstance(ct, ListType) and ct.elem == STRING):
+                self.error("E_TYPE_MISMATCH",
+                           "select needs List[String], got %s" % ct,
+                           args[0][1])
+            return QueryType(table)
+        if name == "where":
+            if (len(args) != 3 or args[0][0] is not None
+                    or args[1][0] is not None or args[2][0] is not None):
+                self.error("E_ARGC",
+                           "where takes (column, op, value)", node)
+                return QueryType(table)
+            self.check_expr(args[0][1], scope)
+            self.check_expr(args[1][1], scope)
+            vt = self.check_expr(args[2][1], scope)
+            if not isinstance(vt, (PrimType,)):
+                self.error("E_TYPE_MISMATCH",
+                           "where value must be Int/Float/String/Bool, got "
+                           "%s" % vt, args[2][1])
+            col = self._str_literal(args[0][1])
+            if col is not None:
+                self._check_db_column(table, col, args[0][1])
+            op = self._str_literal(args[1][1])
+            if op is not None and op not in (
+                    "=", "!=", "<", ">", "<=", ">=", "like"):
+                self.error("E_DB_SCHEMA",
+                           "unknown where operator '%s'" % op, args[1][1],
+                           hint="use =, !=, <, >, <=, >=, like")
+            return QueryType(table)
+        if name == "orderBy":
+            if len(args) != 2 or args[0][0] is not None:
+                self.error("E_ARGC", "orderBy takes (column, dir)", node)
+                return QueryType(table)
+            self.check_expr(args[0][1], scope)
+            col = self._str_literal(args[0][1])
+            if col is not None:
+                self._check_db_column(table, col, args[0][1])
+            return QueryType(table)
+        if name == "limit":
+            if len(args) != 1 or args[0][0] is not None:
+                self.error("E_ARGC", "limit takes an Int", node)
+                return QueryType(table)
+            lt = self.check_expr(args[0][1], scope)
+            self.check_compatible(INT, lt, args[0][1], "limit")
+            return QueryType(table)
+        if name == "all":
+            self._need_effect(CONSOLE, node, "query.all")
+            if args:
+                self.error("E_ARGC", "all takes no arguments", node)
+            return ResultType(ListType(JSON), STRING)
+        if name == "first":
+            self._need_effect(CONSOLE, node, "query.first")
+            if args:
+                self.error("E_ARGC", "first takes no arguments", node)
+            return ResultType(OptionType(JSON), STRING)
+        self.error("E_NO_METHOD", "Query has no method '%s'" % name, node,
+                   hint="select, where, orderBy, limit, all, first")
+        return QueryType(table)
+
     def _check_MethodCall(self, node, scope):
         ot = self.check_expr(node.obj, scope)
         if isinstance(ot, ListType) and node.name == "push":
@@ -1654,6 +2038,8 @@ class Checker:
         if isinstance(ot, ModuleType):
             return self._check_module_member_call(ot.name, node.name,
                                                   node, scope)
+        if isinstance(ot, QueryType):
+            return self._check_query_method(ot, node, scope)
         self.error("E_NO_METHOD", "type %s has no method '%s'" % (ot,
                                                                  node.name),
                    node)

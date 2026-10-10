@@ -12,9 +12,11 @@ from .loop import (EventLoop, Tasklet, TaskletCancelled, DeadlockError,
                    current_tasklet, SleepAwaitable, TaskAwaitable,
                    TaskletAwaitable)
 from .types import (INT, FLOAT, STRING, BOOL, UNIT, ANY, ListType, OptionType,
-                    ResultType, ClassType, InstanceType, ClassInfo)
+                    ResultType, ClassType, InstanceType, ClassInfo, JSON, DB)
 from .checker import (PURE, CONSOLE, IO_EFF, NET_EFF, TOP_EFF, EFFECT_OF,
                       FuncSig, _Cap, Checker)
+from .web import VRouter, VRequest, VResponse
+from .db import VDb, VQuery
 
 INT_MIN = -(2 ** 63)
 INT_MAX = 2 ** 63 - 1
@@ -27,6 +29,31 @@ class NovaError(Exception):
         self.line = line
         self.col = col
         self.hint = hint
+
+
+# -- thread support probe ----------------------------------------------
+# Some hosts (notably Pyodide in the browser without cross-origin
+# isolation) cannot start OS threads at all: thread.start() raises
+# RuntimeError. Probe once, then run the whole program inline on the
+# calling thread when threads are missing. spawn { } already runs
+# inline in single mode; every await/join falls back to its blocking
+# form when current_tasklet() is None; spawn_async { } raises a clean
+# Nova error instead of crashing the runtime.
+_THREADS_OK = None
+
+
+def _threads_available():
+    global _THREADS_OK
+    if _THREADS_OK is None:
+        try:
+            import threading as _th
+            _t = _th.Thread(target=lambda: None, daemon=True)
+            _t.start()
+            _t.join(timeout=10)
+            _THREADS_OK = True
+        except RuntimeError:
+            _THREADS_OK = False
+    return _THREADS_OK
 
 
 # -- blocking syscalls -------------------------------------------------
@@ -115,6 +142,21 @@ class VResult:
 class VCapability:
     def __init__(self, name):
         self.name = name
+
+
+class VJson:
+    """A parsed JSON document (dict | list | str | int | float | bool)."""
+
+    def __init__(self, value):
+        self.value = value
+
+
+class VVector:
+    """A fixed-dimension embedding vector."""
+
+    def __init__(self, dim, items):
+        self.dim = dim
+        self.items = items  # [float], len == dim
 
 
 class VModule:
@@ -233,6 +275,49 @@ class Env:
         return None
 
 
+def _json_compact(v):
+    import json as _json
+    try:
+        s = _json.dumps(v, separators=(",", ":"))
+    except (TypeError, ValueError):
+        s = "?"
+    return s[:60]
+
+
+def nova_to_json(v):
+    """Convert a Nova value to a JSON-encodable Python value."""
+    import json as _json
+    if v is VUNIT:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return v
+    if isinstance(v, str):
+        return v
+    if isinstance(v, VList):
+        return [nova_to_json(x) for x in v.items]
+    if isinstance(v, VOption):
+        return None if v.value is None else nova_to_json(v.value)
+    if isinstance(v, VResult):
+        return {"ok": nova_to_json(v.value)} if v.is_ok else \
+            {"err": nova_to_json(v.value)}
+    if isinstance(v, VJson):
+        return v.value
+    if isinstance(v, VVector):
+        return v.items
+    if isinstance(v, VInstance):
+        return {k: nova_to_json(x) for k, x in v.fields.items()}
+    raise TypeError("cannot serialize %s to JSON" % type(v).__name__)
+
+
+def json_dumps(v):
+    import json as _json
+    return _json.dumps(nova_to_json(v), separators=(",", ":"))
+
+
 def nova_repr(v):
     if v is VUNIT:
         return "()"
@@ -271,6 +356,20 @@ def nova_repr(v):
             nova_repr(v.key), nova_repr(v.value))
     if isinstance(v, VCapability):
         return "<%s capability>" % v.name
+    if isinstance(v, VJson):
+        return "<json %s>" % _json_compact(v.value)
+    if isinstance(v, VVector):
+        return "<vector[%d]>" % v.dim
+    if isinstance(v, VRouter):
+        return "<router %d routes>" % len(v.routes)
+    if isinstance(v, VRequest):
+        return "<request %s %s>" % (v.method, v.path)
+    if isinstance(v, VResponse):
+        return "<response %d>" % v.status
+    if isinstance(v, VDb):
+        return "<db>"
+    if isinstance(v, VQuery):
+        return "<query %s>" % v.table
     if isinstance(v, FuncValue):
         return "<fn %s>" % v.decl.name
     if isinstance(v, AiFuncValue):
@@ -309,11 +408,17 @@ class Interpreter:
         # the event loop, serialized by the scheduler.
         self.threading = threading
         if executor is None and threading != "single":
-            import concurrent.futures as _cf
-            import os as _os
-            workers = max(2, _os.cpu_count() or 2)
-            executor = _cf.ThreadPoolExecutor(max_workers=workers,
-                                              thread_name_prefix="nova-task")
+            if not _threads_available():
+                # No OS threads on this host (e.g. in-browser): degrade
+                # to the single-threaded inline model instead of crashing.
+                threading = "single"
+            else:
+                import concurrent.futures as _cf
+                import os as _os
+                workers = max(2, _os.cpu_count() or 2)
+                executor = _cf.ThreadPoolExecutor(
+                    max_workers=workers, thread_name_prefix="nova-task")
+        self.threading = threading
         self.executor = executor
         if stream_provider is None:
             from .streams import select_stream_provider
@@ -410,6 +515,28 @@ class Interpreter:
             # Root capability grant. Imported modules never get these.
             self.global_env.define("io", VCapability("IO"), False, "cap")
             self.global_env.define("net", VCapability("Net"), False, "cap")
+        if _threads_available():
+            return self._run_with_loop(program, filename)
+        return self._run_inline(program)
+
+    def _run_inline(self, program):
+        # Thread-free hosts (e.g. Pyodide in the browser): no event loop,
+        # no tasklets — run every statement on the calling thread.
+        # current_tasklet() is None throughout, so spawn { } (already
+        # inline in single mode) awaits via future.result(), sleep()
+        # blocks inline, and IO/provider calls run directly instead of
+        # offloading. spawn_async { } raises a clean Nova error.
+        self.loop = None
+        for stmt in program.stmts:
+            if isinstance(stmt, A.Import):
+                continue
+            self.exec_top(stmt)
+        # Structured concurrency: every spawned task completes before
+        # the program exits; un-awaited task failures surface here.
+        self._join_tasks(reraise=True)
+        return self.output
+
+    def _run_with_loop(self, program, filename):
         # v2: the whole program runs as the root tasklet on the
         # cooperative event loop. spawn { } still uses the worker pool
         # for real parallelism; spawn_async { } and async fns are
@@ -417,8 +544,11 @@ class Interpreter:
         loop = EventLoop()
         self.loop = loop
         import concurrent.futures as _cf
-        io_exec = _cf.ThreadPoolExecutor(max_workers=4,
-                                         thread_name_prefix="nova-io")
+        try:
+            io_exec = _cf.ThreadPoolExecutor(max_workers=4,
+                                             thread_name_prefix="nova-io")
+        except RuntimeError:
+            io_exec = None  # threads vanished mid-run; IO runs inline
         loop.io_executor = io_exec
 
         def root_body():
@@ -440,7 +570,8 @@ class Interpreter:
         except DeadlockError as e:
             raise NovaError("R_DEADLOCK", str(e))
         finally:
-            io_exec.shutdown(wait=False)
+            if io_exec is not None:
+                io_exec.shutdown(wait=False)
         # Un-awaited tasklet failures surface here (pool-task failures
         # are already handled by _join_tasks).
         for tl in loop._tasklets:
@@ -530,9 +661,10 @@ class Interpreter:
         for name, cd in sub.components.items():
             if not name.startswith("_"):
                 attrs[name] = cd
-        mod = VModule(node.name, attrs)
-        self.modules[node.name] = mod
-        self.global_env.define(node.name, mod, False, "module")
+        local = node.name.split("/")[-1]
+        mod = VModule(local, attrs)
+        self.modules[local] = mod
+        self.global_env.define(local, mod, False, "module")
 
     def exec_top(self, node):
         if isinstance(node, (A.LetDecl, A.VarDecl)):
@@ -615,12 +747,11 @@ class Interpreter:
 
     # -- expressions ------------------------------------------------
     def eval_expr(self, node, env):
-        m = "_eval_" + type(node).__name__
-        fn = getattr(self, m, None)
+        fn = _EVAL_DISPATCH.get(type(node))
         if fn is None:
             self.err("E_INTERNAL", "no evaluator for %s"
                      % type(node).__name__, node)
-        return fn(node, env)
+        return fn(self, node, env)
 
     def _eval_IntLit(self, node, env):
         return node.value
@@ -692,8 +823,7 @@ class Interpreter:
         l = self.eval_expr(node.left, env)
         r = self.eval_expr(node.right, env)
         if op == "+":
-            if isinstance(l, int) and isinstance(r, int) \
-                    and not isinstance(l, bool):
+            if type(l) is int and type(r) is int:
                 return self._ck(l + r, node, "addition")
             if isinstance(l, float) and isinstance(r, float):
                 return l + r
@@ -701,8 +831,7 @@ class Interpreter:
                 return l + r
             self.err("E_TYPE_MISMATCH", "bad operands for +", node)
         if op in ("-", "*", "/", "%"):
-            if isinstance(l, int) and isinstance(r, int) \
-                    and not isinstance(l, bool) and not isinstance(r, bool):
+            if type(l) is int and type(r) is int:
                 return self._int_op(op, l, r, node)
             if isinstance(l, float) and isinstance(r, float):
                 if op == "+":
@@ -924,7 +1053,15 @@ class Interpreter:
     def call_var(self, name, args, node, env):
         if name in ("print", "str", "int", "len", "assert", "render",
                     "readFile", "writeFile", "fetch", "prompt", "secret",
-                    "sleep"):
+                    "sleep", "jsonParse", "toJson", "jsonGet", "jsonStr",
+                    "jsonInt", "jsonFloat", "jsonBool", "jsonList", "router",
+                    "route", "use", "staticDir", "serve", "response",
+                    "jsonResponse", "reqMethod", "reqPath", "reqBody",
+                    "reqJson", "param", "paramInt", "query", "header", "env",
+                    "parseInt", "parseFloat", "similarity", "topK",
+                    "dbOpen", "dbTable", "dbExec",
+                    "get", "post", "put", "delete", "patch",
+                    "redirect"):
             return self.call_builtin(name, args, node, env)
         if name in self.components:
             return self.instantiate(self.components[name], args, node)
@@ -1051,6 +1188,49 @@ class Interpreter:
         finally:
             self.fx = saved_fx
 
+    def _eval_query_method(self, q, node, args):
+        from .db import run_query, DbError
+        name = node.name
+        if name == "select":
+            cols = args[0][1]
+            if not isinstance(cols, VList):
+                self.err("E_TYPE_MISMATCH", "select needs List[String]",
+                         node)
+            nq = q.clone()
+            nq._select = [c for c in cols.items]
+            return nq
+        if name == "where":
+            col, op, val = args[0][1], args[1][1], args[2][1]
+            nq = q.clone()
+            nq._wheres.append((col, op, _query_scalar(val, node, self)))
+            return nq
+        if name == "orderBy":
+            nq = q.clone()
+            nq._order = (args[0][1], args[1][1] if len(args) > 1 else "asc")
+            return nq
+        if name == "limit":
+            nq = q.clone()
+            nq._limit = args[0][1]
+            return nq
+        if name == "all":
+            self.check_fx(CONSOLE, node, "query.all")
+            try:
+                rows = run_query(q)
+            except DbError as e:
+                return VResult(ListType(JSON), STRING, False, str(e))
+            return VResult(ListType(JSON), STRING, True,
+                           VList(JSON, [VJson(r) for r in rows]))
+        if name == "first":
+            self.check_fx(CONSOLE, node, "query.first")
+            try:
+                rows = run_query(q)
+            except DbError as e:
+                return VResult(OptionType(JSON), STRING, False, str(e))
+            v = VJson(rows[0]) if rows else None
+            return VResult(OptionType(JSON), STRING, True,
+                           VOption(JSON, v))
+        self.err("E_NO_METHOD", "Query has no method '%s'" % name, node)
+
     def _eval_MethodCall(self, node, env):
         obj = self.eval_expr(node.obj, env)
         args = [(n, self.eval_expr(e, env)) for n, e in node.args]
@@ -1069,6 +1249,8 @@ class Interpreter:
                 msg = args[0][1] if args else "unwrapped Err"
                 self.err("R_UNWRAP_ERR", "unwrap on Err: %s" % msg, node)
             return obj.value
+        if isinstance(obj, VQuery):
+            return self._eval_query_method(obj, node, args)
         if isinstance(obj, VCompInstance) and node.name == "fire":
             if len(args) != 1 or not isinstance(args[0][1], str):
                 self.err("E_ARGC", "fire takes an event name string", node)
@@ -1610,7 +1792,10 @@ class Interpreter:
         return self._ai_checker().resolve_type(tnode)
 
     def schema_json(self, t):
-        from .types import ListType, OptionType, ClassType
+        from .types import ListType, OptionType, ClassType, VectorType
+        if isinstance(t, VectorType):
+            return {"type": "array", "items": {"type": "number"},
+                    "minItems": t.dim, "maxItems": t.dim}
         if t == INT:
             return {"type": "integer"}
         if t == FLOAT:
@@ -1634,7 +1819,10 @@ class Interpreter:
         return {}
 
     def build_mock(self, t, prompt, depth=0):
-        from .types import ListType, OptionType, ResultType, ClassType
+        from .types import (ListType, OptionType, ResultType, ClassType,
+                            VectorType)
+        if isinstance(t, VectorType):
+            return VVector(t.dim, _mock_embedding(prompt, t.dim))
         if t == INT:
             return 42
         if t == FLOAT:
@@ -1792,6 +1980,218 @@ class Interpreter:
                 return VResult(STRING, STRING, False,
                                "secret not found: " + vals[0])
             return VResult(STRING, STRING, True, val)
+        # -- JSON --------------------------------------------------
+        if name == "jsonParse":
+            import json as _json
+            try:
+                return VResult(JSON, STRING, True,
+                               VJson(_json.loads(vals[0])))
+            except Exception as e:
+                return VResult(JSON, STRING, False, "invalid JSON: %s" % e)
+        if name == "toJson":
+            try:
+                return json_dumps(vals[0])
+            except TypeError as e:
+                self.err("E_TYPE_MISMATCH", str(e), node)
+        if name == "jsonGet":
+            j, key = vals[0], vals[1]
+            if not isinstance(j, VJson) or not isinstance(j.value, dict):
+                return VOption(JSON, None)
+            v = j.value.get(key)
+            return VOption(JSON, VJson(v) if v is not None else None)
+        if name == "jsonStr":
+            j = vals[0]
+            v = j.value if isinstance(j, VJson) else None
+            return VOption(STRING, v if isinstance(v, str) else None)
+        if name == "jsonInt":
+            j = vals[0]
+            v = j.value if isinstance(j, VJson) else None
+            if isinstance(v, bool):
+                return VOption(INT, None)
+            if isinstance(v, int):
+                out = v
+            elif isinstance(v, float) and v.is_integer():
+                out = int(v)
+            else:
+                return VOption(INT, None)
+            if out < INT_MIN or out > INT_MAX:
+                return VOption(INT, None)
+            return VOption(INT, out)
+        if name == "jsonFloat":
+            j = vals[0]
+            v = j.value if isinstance(j, VJson) else None
+            if isinstance(v, bool):
+                return VOption(FLOAT, None)
+            if isinstance(v, (int, float)):
+                return VOption(FLOAT, float(v))
+            return VOption(FLOAT, None)
+        if name == "jsonBool":
+            j = vals[0]
+            v = j.value if isinstance(j, VJson) else None
+            return VOption(BOOL, v if isinstance(v, bool) else None)
+        if name == "jsonList":
+            j = vals[0]
+            v = j.value if isinstance(j, VJson) else None
+            if not isinstance(v, list):
+                return VOption(ListType(JSON), None)
+            return VOption(ListType(JSON),
+                           VList(JSON, [VJson(x) for x in v]))
+        # -- misc --------------------------------------------------
+        if name == "env":
+            v = os.environ.get(vals[0])
+            return VOption(STRING, v)
+        if name == "parseInt":
+            try:
+                v = int(vals[0].strip(), 10)
+            except (ValueError, AttributeError):
+                return VOption(INT, None)
+            if v < INT_MIN or v > INT_MAX:
+                return VOption(INT, None)
+            return VOption(INT, v)
+        if name == "parseFloat":
+            try:
+                return VOption(FLOAT, float(vals[0].strip()))
+            except (ValueError, AttributeError):
+                return VOption(FLOAT, None)
+        # -- vectors (RAG-native) ----------------------------------
+        if name == "similarity":
+            a, b = vals[0], vals[1]
+            if not isinstance(a, VVector) or not isinstance(b, VVector):
+                self.err("E_TYPE_MISMATCH", "similarity needs Vectors",
+                         node)
+            if a.dim != b.dim:
+                self.err("R_VECTOR_DIM",
+                         "vector dimensions differ: %d vs %d"
+                         % (a.dim, b.dim), node)
+            return _cosine(a.items, b.items)
+        if name == "topK":
+            q, vecs, k = vals[0], vals[1], vals[2]
+            if not isinstance(q, VVector):
+                self.err("E_TYPE_MISMATCH", "topK query must be a Vector",
+                         node)
+            scored = []
+            for i, v in enumerate(vecs.items):
+                if not isinstance(v, VVector) or v.dim != q.dim:
+                    self.err("R_VECTOR_DIM",
+                             "topK vector %d has wrong dimension" % i, node)
+                scored.append((_cosine(q.items, v.items), i))
+            scored.sort(key=lambda t: t[0], reverse=True)
+            return VList(INT, [i for _, i in scored[:max(k, 0)]])
+        # -- Nova Boot ---------------------------------------------
+        if name == "router":
+            return VRouter()
+        if name == "route" or name in ("get", "post", "put", "delete",
+                                       "patch"):
+            from .web import Route
+            _METHODS = {"get": "GET", "post": "POST", "put": "PUT",
+                        "delete": "DELETE", "patch": "PATCH"}
+            if name == "route":
+                r, method, pat, handler = vals[0], vals[1], vals[2], vals[3]
+                cap = vals[4]
+            else:
+                r, pat, handler = vals[0], vals[1], vals[2]
+                method = _METHODS[name]
+                cap = vals[3]
+            if not isinstance(cap, VCapability) or cap.name != "IO":
+                self.err("E_CAPABILITY", "route needs an IO capability",
+                         node)
+            try:
+                r.routes.append(Route(method, pat, handler))
+            except Exception as e:
+                self.err("E_ROUTE", "bad route pattern: %s" % e, node)
+            return VUNIT
+        if name == "use":
+            r, mw = vals[0], vals[1]
+            if not isinstance(r, VRouter):
+                self.err("E_TYPE_MISMATCH", "use needs a Router", node)
+            r.middlewares.append(mw)
+            return VUNIT
+        if name == "staticDir":
+            r, prefix, directory = vals[0], vals[1], vals[2]
+            if not isinstance(r, VRouter):
+                self.err("E_TYPE_MISMATCH", "staticDir needs a Router",
+                         node)
+            r.statics.append((prefix, directory))
+            return VUNIT
+        if name == "serve":
+            self.check_fx(IO_EFF, node, "serve")
+            r, port = vals[0], vals[1]
+            cap = vals[2]
+            if not isinstance(r, VRouter):
+                self.err("E_TYPE_MISMATCH", "serve needs a Router", node)
+            if not isinstance(cap, VCapability) or cap.name != "IO":
+                self.err("E_CAPABILITY", "serve needs an IO capability",
+                         node)
+            from .web import serve_router
+            return serve_router(self, r, port, node)
+        if name == "response":
+            status, body, ctype = vals[0], vals[1], vals[2]
+            return VResponse(status, body, ctype)
+        if name == "redirect":
+            return VResponse(302, "", "text/plain",
+                             {"Location": vals[0]})
+        if name == "jsonResponse":
+            status, v = vals[0], vals[1]
+            try:
+                return VResponse(status, json_dumps(v),
+                                 "application/json")
+            except TypeError as e:
+                self.err("E_TYPE_MISMATCH", str(e), node)
+        if name == "reqMethod":
+            return vals[0].method
+        if name == "reqPath":
+            return vals[0].path
+        if name == "reqBody":
+            return vals[0].body
+        if name == "reqJson":
+            import json as _json
+            try:
+                return VResult(JSON, STRING, True,
+                               VJson(_json.loads(vals[0].body)))
+            except Exception as e:
+                return VResult(JSON, STRING, False,
+                               "invalid JSON body: %s" % e)
+        if name == "param":
+            v = vals[0].path_params.get(vals[1])
+            return VOption(STRING, v)
+        if name == "paramInt":
+            raw = vals[0].typed_params.get(vals[1])
+            return VOption(INT, raw if isinstance(raw, int) else None)
+        if name == "query":
+            v = vals[0].query.get(vals[1])
+            return VOption(STRING, v)
+        if name == "header":
+            v = vals[0].headers.get(vals[1].lower())
+            return VOption(STRING, v)
+        # -- database ----------------------------------------------
+        if name == "dbOpen":
+            self.check_fx(IO_EFF, node, "dbOpen")
+            cap = vals[1]
+            if not isinstance(cap, VCapability) or cap.name != "IO":
+                self.err("E_CAPABILITY", "dbOpen needs an IO capability",
+                         node)
+            from .db import open_db, DbError
+            try:
+                return VResult(DB, STRING, True, open_db(vals[0]))
+            except DbError as e:
+                return VResult(DB, STRING, False, str(e))
+        if name == "dbTable":
+            db, table = vals[0], vals[1]
+            if not isinstance(db, VDb):
+                self.err("E_TYPE_MISMATCH", "dbTable needs a Db", node)
+            return VQuery(db, table)
+        if name == "dbExec":
+            self.check_fx(CONSOLE, node, "dbExec")
+            db, sql = vals[0], vals[1]
+            cap = vals[2]
+            if not isinstance(cap, VCapability) or cap.name != "IO":
+                self.err("E_CAPABILITY", "dbExec needs an IO capability",
+                         node)
+            from .db import exec_sql, DbError
+            try:
+                return VResult(INT, STRING, True, exec_sql(db, sql))
+            except DbError as e:
+                return VResult(INT, STRING, False, str(e))
         self.err("E_INTERNAL", "unknown builtin " + name, node)
 
 
@@ -1836,3 +2236,61 @@ def format_html(vnode):
                      else _escape_html(c))
     parts.append("</%s>" % vnode.tag)
     return "".join(parts)
+
+
+def _query_scalar(v, node, interp):
+    """Convert a Nova where-value to a sqlite parameter."""
+    if isinstance(v, bool):
+        return 1 if v else 0
+    if isinstance(v, (int, float, str)):
+        return v
+    if isinstance(v, VOption):
+        return None if v.value is None else _query_scalar(v.value, node,
+                                                          interp)
+    interp.err("E_TYPE_MISMATCH",
+               "where value must be Int/Float/String/Bool", node)
+
+
+def _build_eval_dispatch():
+    d = {}
+    for name in dir(Interpreter):
+        if name.startswith("_eval_"):
+            ast_cls = getattr(A, name[len("_eval_"):], None)
+            if ast_cls is not None:
+                d[ast_cls] = getattr(Interpreter, name)
+    return d
+
+
+_EVAL_DISPATCH = _build_eval_dispatch()
+
+
+def _cosine(a, b):
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def _mock_embedding(prompt, dim):
+    """Deterministic pseudo-embedding: sha256 stream -> [-1, 1] floats,
+    L2-normalized. Stable across runs (no hash randomization)."""
+    import hashlib
+    import math
+    out = []
+    counter = 0
+    while len(out) < dim:
+        h = hashlib.sha256(("%d:%s" % (counter, prompt)).encode("utf-8"))
+        digest = h.digest()
+        for i in range(0, len(digest), 4):
+            if len(out) >= dim:
+                break
+            word = int.from_bytes(digest[i:i + 4], "big")
+            out.append((word / 2 ** 32) * 2 - 1)
+        counter += 1
+    norm = math.sqrt(sum(x * x for x in out)) or 1.0
+    return [x / norm for x in out]
+
+
