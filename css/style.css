@@ -143,6 +143,9 @@ pre code { background: none; padding: 0; color: var(--text); }
   font-size: .88rem; padding: 18px; resize: vertical; line-height: 1.7; }
 .pg-run { margin: 14px 0; }
 .pg-output { min-height: 120px; }
+.pg-preview-wrap { margin-bottom: 12px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.pg-preview-label { font-size: .75rem; color: var(--muted); padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.pg-preview { width: 100%; min-height: 160px; border: 0; background: #fff; display: block; }
 .pg-status { font-size: .85rem; color: var(--muted); margin-bottom: 12px; }
 .pg-status .ok { color: var(--green); } .pg-status .warn { color: var(--gold); }
 

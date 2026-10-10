@@ -26,6 +26,7 @@
     <h4>Documentation</h4>
         <a href="overview.html">Overview</a>
     <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="domains.html">Why Nova — by domain</a>
     <a href="faq.html">FAQ</a>
     <a href="migration-guide.html">Migration Guide</a>
     <a href="deployment.html">Deployment</a>
@@ -40,7 +41,7 @@
   </aside>
   <article class="doc-body">
 <h1>Learn Nova in 30 minutes</h1>
-<p>A guided tour for a React developer. Every snippet below is runnable with <code>nova run &lt;file&gt;.nova</code> — type it out, run it, break it, read the error. Nova&#x27;s diagnostics are designed to teach you (each is a stable code + hint, JSON-readable; see SPEC §16).</p>
+<p>You already know React and JavaScript — this tour maps Nova onto what you know. Every snippet runs right here in your browser: hit <strong>Edit &amp; run</strong>, then <strong>Run</strong>. Break things on purpose; the error messages will teach you.</p>
 <h2>(a) Hello + type inference — 2 minutes</h2>
 <pre><code class="language-nova">let greeting: String = &quot;Hello&quot;
 let target = &quot;Nova&quot;          // inferred: String — no annotation needed
@@ -56,9 +57,8 @@ fn greet(who: String) -&gt; String {
 }
 
 print(greet(target))</code></pre>
-<p><strong>Notice:</strong> <code>let</code> is immutable; types are usually inferred, but function <em>parameters</em> always need types (the compiler can&#x27;t guess your API). There is no <code>any</code> — Nova never lets a value escape without a type.</p>
-<p><strong>Analogy:</strong> <code>let</code> ≈ <code>const</code>, <code>var</code> ≈ <code>let</code>. Unlike TypeScript, you almost never write <code>as</code>; there are no implicit conversions — <code>str(pi)</code> converts a Float to a String explicitly.</p>
-<h2>(b) Functions, purity, effects</h2>
+<p>That&#x27;s the whole deal: <code>let</code> never changes (like <code>const</code>), types are usually figured out for you, and there&#x27;s no <code>any</code> — every value has a known type. Function parameters always need types, because the compiler can&#x27;t guess your API.</p>
+<h2>(b) Functions are pure by default</h2>
 <pre><code class="language-nova">fn double(x: Int) -&gt; Int {   // pure: no side effects allowed
   return x * 2
 }
@@ -70,9 +70,8 @@ effect fn shout(msg: String) {  // may print — declared up front
 effect io fn load(path: String, io: IO) -&gt; Result[String, String] {
   return readFile(path, io)   // needs the IO capability as a parameter
 }</code></pre>
-<p><strong>Notice:</strong> Functions are pure by default. A pure function calling <code>print</code> is a compile error (<code>E_EFFECT</code>). Effect levels nest: <code>pure &lt; effect &lt; effect io / effect net</code>. A function&#x27;s signature is its authority manifest — you can see exactly what a function is allowed to do without reading its body.</p>
-<p><strong>Analogy:</strong> Think of React&#x27;s separation of pure render vs <code>useEffect</code> — except the compiler enforces it, not convention. Capabilities (<code>IO</code>, <code>Net</code>) are like requiring a prop for side effects: you can&#x27;t sneak one in.</p>
-<h2>(c) Option, Result, <code>?</code>, match — the no-null story</h2>
+<p>A pure function that tries to <code>print</code> is a compile error — you say what a function may do in its signature (<code>effect</code>, <code>effect io</code>, <code>effect net</code>). It&#x27;s React&#x27;s pure-render vs <code>useEffect</code> split, except the compiler enforces it. Capabilities like <code>IO</code> are passed as parameters, so side effects can&#x27;t sneak in.</p>
+<h2>(c) No null — Option and Result instead</h2>
 <pre><code class="language-nova">// JS: function getUser(id) { return db.find(id) ?? undefined }
 // Nova: absence is a TYPE, not a forgotten value.
 
@@ -102,9 +101,8 @@ effect fn greetUser(id: Int) -&gt; Result[String, String] {
   let name = fetchUser(id)?   // Err returns early — the happy path stays linear
   return Ok(&quot;Hello, &quot; + name + &quot;!&quot;)
 }</code></pre>
-<p><strong>Notice:</strong> <code>null</code>, <code>nil</code>, <code>undefined</code> don&#x27;t exist — using one is <code>E_NO_NULL</code>. <code>match</code> arms must be <em>exhaustive</em> (missing <code>None</code> is a compile error, <code>E_NON_EXHAUSTIVE</code>). <code>?</code> propagates <code>Err</code>/<code>None</code> to the enclosing function, which must itself return <code>Result</code>/<code>Option</code> — the compiler connects the dots for you.</p>
-<p><strong>Analogy:</strong> <code>Option&lt;T&gt;</code> ≈ TypeScript&#x27;s <code>T | undefined</code> but enforced: you literally cannot touch the value without handling both arms. <code>Result</code> + <code>?</code> ≈ <code>try/catch</code> flattened — no invisible jumps.</p>
-<h2>(d) Your first component: props, state, events, re-render</h2>
+<p><code>null</code> and <code>undefined</code> don&#x27;t exist. <code>match</code> must handle every case (the compiler checks). <code>?</code> is early-return for errors — like <code>try/catch</code> without the invisible jumps.</p>
+<h2>(d) Components: props, state, events</h2>
 <pre><code class="language-nova">component Counter(title: String) {
   state count: Int = 0
 
@@ -119,9 +117,8 @@ effect fn greetUser(id: Int) -&gt; Result[String, String] {
 
 let app = render(Counter(title: &quot;Clicks&quot;))
 app.fire(&quot;onClick&quot;)   // state → 1, re-renders automatically</code></pre>
-<p><strong>Notice:</strong> Props are immutable (<code>title = &quot;x&quot;</code> is <code>E_IMMUTABLE</code>). State is a first-class declaration — order-independent, no rules-of-hooks: you cannot call it &quot;in a loop by accident&quot; because there is no hook call at all. Assignment is an <em>expression</em>, so the handler is just <code>count = count + 1</code> — no <code>setCount(c =&gt; c + 1)</code> wrapper. Handlers run with full effects and re-render afterwards.</p>
-<p><strong>Analogy:</strong> <code>component Counter(title: String)</code> ≈ <code>function Counter({ title })</code>. <code>state count: Int = 0</code> ≈ <code>useState(0)</code> minus the footguns. <code>&lt;for x in items&gt;</code> ≈ <code>.map</code>, <code>&lt;if cond&gt;</code> ≈ ternary.</p>
-<h2>(e) Classes, interfaces, data classes</h2>
+<p>Props are immutable. State is declared, not hooked — no rules-of-hooks, no stale closures. The click handler is just an assignment; Nova re-renders after it. (In the playground above, component output also renders as a live browser preview.)</p>
+<h2>(e) Classes without the boilerplate</h2>
 <pre><code class="language-nova">interface Shape {
   fn area() -&gt; Float
 }
@@ -139,9 +136,8 @@ data class Point(x: Float, y: Float)
 
 let p = Point(x: 1.0, y: 2.0)
 print(p == Point(x: 1.0, y: 2.0))   // true — structural equality built in</code></pre>
-<p><strong>Notice:</strong> <code>let</code> fields are assigned once in <code>init</code>. Methods are pure unless marked <code>effect</code>. <code>data class</code> gives you fields, construction, <code>==</code>, and a readable print — the mechanical parts of a POJO without the boilerplate.</p>
-<p><strong>Analogy:</strong> <code>data class</code> ≈ Java <code>record</code>, but with structural <code>==</code> out of the box. <code>interface</code>/<code>implements</code>/<code>extends</code> work exactly like Java.</p>
-<h2>(f) Modules + <code>nova lock</code></h2>
+<p><code>interface</code>, <code>implements</code>, <code>extends</code> work like Java. <code>data class</code> is Java&#x27;s <code>record</code> with <code>==</code> that just works.</p>
+<h2>(f) Modules</h2>
 <pre><code class="language-nova" data-norun="1">// nova_helpers.nova
 fn greet(name: String) -&gt; String {
   return &quot;Hello, &quot; + name + &quot;!&quot;
@@ -149,12 +145,10 @@ fn greet(name: String) -&gt; String {
 <pre><code class="language-nova" data-norun="1">// app.nova (entry)
 import nova_helpers
 print(nova_helpers.greet(&quot;Ada&quot;))   // namespaced — no classpath, no collisions</code></pre>
-<p><code>_private</code> names (leading underscore) are invisible outside their module — <code>E_IMPORT</code> if you try. Then pin the supply chain:</p>
-<pre><code class="language-bash">nova lock app.nova        # hashes every transitive import into nova.lock
-nova run --locked app.nova  # refuses to run if anything was tampered with</code></pre>
-<p><strong>Notice:</strong> No <code>node_modules</code> abyss: imports are explicit file references, and <code>nova.lock</code> makes them content-addressed.</p>
-<p><strong>Analogy:</strong> <code>import x</code> ≈ ES modules, <code>nova.lock</code> ≈ <code>package-lock.json</code> — except it hashes <em>source files</em>, not registry tarballs.</p>
-<h2>(g) async / spawn / streams</h2>
+<p>Imports are plain file references (like ES modules). Names starting with <code>_</code> stay private to their module. <code>nova lock</code> pins every dependency by hash so builds are reproducible:</p>
+<pre><code class="language-bash">nova lock app.nova            # write hashes into nova.lock
+nova run --locked app.nova    # refuse to run if anything changed</code></pre>
+<h2>(g) Async done right: spawn vs await</h2>
 <pre><code class="language-nova">fn fib(n: Int) -&gt; Int {
   if n &lt; 2 { return n }
   return fib(n - 1) + fib(n - 2)
@@ -176,11 +170,8 @@ print(t.await())
 
 // IO-bound -&gt; async: coordinate with await
 print(doubleAll([1, 2, 3]))</code></pre>
-<p><strong>The rule the compiler enforces:</strong></p>
-<table><thead><tr><th>Workload</th><th>Construct</th></tr></thead><tbody><tr><td>IO-bound (fetch, read, AI calls)</td><td><code>async fn</code> + <code>await</code></td></tr><tr><td>CPU-bound (fib, image ops, parsing)</td><td><code>spawn { }</code> worker pool</td></tr></tbody></table>
-<p><strong>Notice:</strong> Calling blocking IO <em>directly</em> inside an <code>async fn</code> is a compile error — <code>E_ASYNC_BLOCKING</code> (&quot;wrap it in <code>spawn { }</code>&quot;). This is Nova teaching you the architecture: the async function would stall the event loop. <code>?</code> may not appear directly in a <code>spawn</code> block (<code>E_QUESTION</code>) — handle <code>Result</code> with <code>match</code> inside the task.</p>
-<p><strong>Analogy:</strong> This is Node&#x27;s event-loop model with teeth. Nova&#x27;s <code>async</code>/<code>spawn</code>/<code>await</code> are not three spellings of JS&#x27;s <code>async/await</code> — Nova has no <code>await</code> keyword floating around promises; <code>async fn</code> marks <em>await-capability</em>, and <code>Task[T].await()</code> blocks the caller. There&#x27;s nothing like a JS <code>Promise</code> — a <code>Task</code> is a structured, join-guaranteed computation.</p>
-<p><strong>Streams</strong> (typed pub/sub, Kafka-shaped):</p>
+<p>Two tools, one rule: <strong><code>spawn { }</code> for CPU work</strong> (real parallelism), <strong><code>async fn</code> + <code>await</code> for IO</strong> (cooperative, never blocks the loop). The compiler rejects blocking IO inside <code>async fn</code> — wrap it in <code>spawn { }</code> instead.</p>
+<p><strong>Streams</strong> (typed pub/sub):</p>
 <pre><code class="language-nova">stream events: String
 
 effect fn main() {
@@ -192,7 +183,7 @@ effect fn main() {
   }
 }
 main()</code></pre>
-<h2>(h) ai fn + secret + app.nova + build/deploy — 5 minutes</h2>
+<h2>(h) AI functions, secrets, deploy</h2>
 <pre><code class="language-nova">// The return TYPE is the output schema — the provider must conform to it.
 data class Summary(headline: String, score: Float)
 
@@ -208,12 +199,12 @@ effect net fn run(net: Net) {
   print(s.headline)
 }
 run(net)</code></pre>
-<p><strong>Notice:</strong> v1 runs against a deterministic <strong>mock provider</strong> — no network, no key, reproducible output. <code>ai fn</code> has <code>net</code> effect, so the caller needs <code>effect net</code> and a <code>Net</code> capability: from <code>async</code> code, spawn-wrap it like any network IO. <code>prompt(...)</code> is mandatory in the body (<code>R_AI_NO_PROMPT</code> otherwise).</p>
-<p><strong>Secrets</strong> are named, never in source:</p>
+<p>An <code>ai fn</code> is a typed function whose body is a prompt — the return type is the output schema. It needs the <code>net</code> effect and a <code>Net</code> capability (AI calls are network calls). This runs against a deterministic mock: no key, no network, same output every time.</p>
+<p>Secrets never live in source:</p>
 <pre><code class="language-nova">effect io fn dbPass(io: IO) -&gt; Result[String, String] {
   return secret(&quot;db-password&quot;, io)   // resolves NOVA_SECRET_DB_PASSWORD at runtime
 }</code></pre>
-<p><strong>Manifest</strong> — <code>app.nova</code> sits next to your entry file:</p>
+<p>Ship it with a manifest (<code>app.nova</code> next to your entry file):</p>
 <pre><code class="language-nova" data-norun="1">app &quot;myapp&quot; {
   version = &quot;0.1.0&quot;
   entry = &quot;main.nova&quot;
@@ -223,39 +214,30 @@ run(net)</code></pre>
   docker { base = &quot;python:3.12-slim&quot;, port = 8080 }
   deploy target = &quot;local&quot;         // local | docker
 }</code></pre>
-<pre><code class="language-bash">nova build                    # validates manifest, type-checks, stages dist/
+<pre><code class="language-bash">nova build                    # type-checks, stages dist/
 nova deploy --target local    # runs as a process; secrets resolve at runtime
 nova deploy --target docker   # docker build of the staged image</code></pre>
 <p>Full walkthrough: <a href="./deployment.html">deployment.md</a>.</p>
 <h2>(i) Naming conventions — 2 minutes</h2>
-<p>Nova takes its naming from the two languages it fuses: types look like Java, functions look like JavaScript. One rule per kind of name — no code-review debates.</p>
-<table><thead><tr><th>Name kind</th><th>Style</th><th>Example</th></tr></thead><tbody><tr><td>Classes, interfaces, enums, data classes</td><td>PascalCase</td><td><code>User</code>, <code>HttpRequest</code></td></tr><tr><td>Components</td><td>PascalCase</td><td><code>UserCard</code>, <code>Counter</code></td></tr><tr><td>Functions, methods</td><td>camelCase</td><td><code>getUser</code>, <code>calculateTotal</code></td></tr><tr><td>Variables, parameters</td><td>camelCase</td><td><code>userName</code>, <code>retryCount</code></td></tr><tr><td>Module-level constants</td><td>SCREAMING_SNAKE_CASE</td><td><code>MAX_RETRIES</code>, <code>DEFAULT_PORT</code></td></tr><tr><td>Type parameters</td><td>single capital letter</td><td><code>T</code>, <code>E</code>, <code>K</code>, <code>V</code></td></tr><tr><td>Module files</td><td>snake_case</td><td><code>helpers.nova</code> → <code>import helpers</code></td></tr><tr><td>Test files</td><td><code>*_test.nova</code></td><td><code>user_test.nova</code> (found by <code>nova test</code>)</td></tr></tbody></table>
+<p>Types look like Java, functions look like JavaScript. One rule each — no debates:</p>
+<table><thead><tr><th>Name kind</th><th>Style</th><th>Example</th></tr></thead><tbody><tr><td>Classes, interfaces, data classes, components</td><td>PascalCase</td><td><code>UserCard</code>, <code>HttpRequest</code></td></tr><tr><td>Functions, methods, variables</td><td>camelCase</td><td><code>getUser</code>, <code>retryCount</code></td></tr><tr><td>Constants (<code>let</code>, immutable)</td><td>SCREAMING_SNAKE_CASE</td><td><code>MAX_RETRIES</code></td></tr><tr><td>Module files</td><td>snake_case</td><td><code>helpers.nova</code></td></tr><tr><td>Test files</td><td><code>*_test.nova</code></td><td><code>user_test.nova</code></td></tr></tbody></table>
 <pre><code class="language-nova" data-norun="1">// ✅ Do
 class UserService { ... }
 component UserCard(user: User) { ... }
 fn getUser(id: Int) -&gt; Option[User] { ... }
-let retryCount = 0
-const MAX_RETRIES = 3
+let MAX_RETRIES = 3               // immutable: SCREAMING_SNAKE_CASE by convention
 
 // ❌ Don&#x27;t
 class userService { ... }      // types are PascalCase
-fn GetUser(id: Int) { ... }    // functions are camelCase
-let MAX = 3                    // screaming case is for constants only</code></pre>
-<p>Three special rules:</p>
-<p>1. <strong>Private is <code>_</code>-prefixed</strong> — <code>_helper</code>, <code>_CACHE</code> are module-private by    convention, like Python. 2. <strong>View tags are CamelCase</strong> — inside a component view, <code>&lt;UserCard&gt;</code>    works; <code>&lt;user-card&gt;</code> is a compile error. The parser enforces this one. 3. <strong>Acronyms stay readable</strong> — <code>HttpRequest</code>, not <code>HTTPRequest</code>;    <code>userId</code>, not <code>userID</code>. Treat an acronym like a word.</p>
-<p><code>nova fmt</code> fixes your whitespace, not your names — naming is a human (and code-review) job. The full normative list lives in SPEC §1.</p>
+fn GetUser(id: Int) { ... }    // functions are camelCase</code></pre>
+<p>Two extras: <code>_helper</code> is module-private by convention; acronyms read as words (<code>HttpRequest</code>, <code>userId</code>). <code>nova fmt</code> fixes whitespace, not names.</p>
 <hr>
 <h2>Where next</h2>
 <ul>
-<li><strong>Syntax + type system deep-dive:</strong> SPEC §1–§3</li>
-<li><strong>Effects lattice, contracts, <code>?</code>:</strong> SPEC §4</li>
-<li><strong>Concurrency &amp; async discipline:</strong> SPEC §6</li>
-<li><strong>Components:</strong> SPEC §8 · <strong>Classes:</strong> SPEC §9</li>
-<li><strong>AI integration:</strong> SPEC §11 · <strong>Secrets/capabilities:</strong> SPEC §12</li>
-<li><strong>Manifest + deployment:</strong> SPEC §14, <a href="./deployment.html">deployment.md</a></li>
-<li><strong>Migrating existing code:</strong> <a href="./migration-guide.html">migration-guide.md</a> (v1 deliverable)</li>
-<li><strong>Skeptical questions answered:</strong> <a href="./faq.html">faq.md</a></li>
-<li><strong>What&#x27;s coming in v2:</strong> ROADMAP.md (NovaVM bytecode, cloud deploy targets, managed secrets, cron scheduler, typed context for components)</li>
+<li><strong>Why Nova, and how it compares:</strong> <a href="./domains.html">Why Nova for your domain →</a></li>
+<li><strong>Deep dives:</strong> SPEC §1–§3 (syntax + types) · §4 (effects) · §6 (concurrency) · §8 (components) · §11 (AI) · §14 (deploy)</li>
+<li><strong>Migrating existing code:</strong> <a href="./migration-guide.html">migration-guide.md</a></li>
+<li><strong>Skeptical questions:</strong> <a href="./faq.html">faq.md</a></li>
 </ul>
   </article>
 </main>
