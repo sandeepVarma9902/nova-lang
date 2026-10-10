@@ -65,9 +65,9 @@ CHROME = """<!DOCTYPE html>
   <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
   <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
 </footer>
-<script src="../js/main.js?v=4"></script>
-<script src="../js/nova-live.js?v=4"></script>
-<script src="../js/runnable.js?v=4"></script>
+<script src="../js/main.js?v=5"></script>
+<script src="../js/nova-live.js?v=5"></script>
+<script src="../js/runnable.js?v=5"></script>
 </body>
 </html>
 """
@@ -112,10 +112,17 @@ def md_to_html(text):
     while i < len(lines):
         line = lines[i]
         # fenced code
-        m = re.match(r"^```(\w*)\s*$", line)
+        m = re.match(r"^```([\w-]*)\s*$", line)
         if m:
             if in_code:
-                lang = ' class="language-%s"' % code_lang if code_lang else ""
+                lang = code_lang
+                extra = ""
+                if lang == "nova-norun":
+                    # illustrative / intentionally-broken / non-Nova blocks:
+                    # highlight as Nova but never get a Run widget
+                    lang = "nova"
+                    extra = ' data-norun="1"'
+                lang = ' class="language-%s"%s' % (lang, extra) if lang else ""
                 out.append("<pre><code%s>%s</code></pre>"
                            % (lang, esc("\n".join(code_buf))))
                 code_buf = []

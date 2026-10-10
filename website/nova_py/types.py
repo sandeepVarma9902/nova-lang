@@ -232,9 +232,16 @@ ANY = AnyType()
 
 
 def is_subtype(sub, sup, classes):
-    """Nominal subtyping for classes/interfaces; structural for generics."""
+    """Nominal subtyping for classes/interfaces; covariant generics."""
     if sub == sup or sup == ANY or sub == ANY:
         return True
+    if isinstance(sub, OptionType) and isinstance(sup, OptionType):
+        return is_subtype(sub.elem, sup.elem, classes)
+    if isinstance(sub, ResultType) and isinstance(sup, ResultType):
+        return (is_subtype(sub.ok, sup.ok, classes)
+                and is_subtype(sub.err, sup.err, classes))
+    if isinstance(sub, ListType) and isinstance(sup, ListType):
+        return is_subtype(sub.elem, sup.elem, classes)
     if isinstance(sub, ClassType) and isinstance(sup, ClassType):
         info = classes.get(sub.name)
         while info is not None and info.parent:

@@ -31,6 +31,31 @@ class NovaError(Exception):
         self.hint = hint
 
 
+# -- thread support probe ----------------------------------------------
+# Some hosts (notably Pyodide in the browser without cross-origin
+# isolation) cannot start OS threads at all: thread.start() raises
+# RuntimeError. Probe once, then run the whole program inline on the
+# calling thread when threads are missing. spawn { } already runs
+# inline in single mode; every await/join falls back to its blocking
+# form when current_tasklet() is None; spawn_async { } raises a clean
+# Nova error instead of crashing the runtime.
+_THREADS_OK = None
+
+
+def _threads_available():
+    global _THREADS_OK
+    if _THREADS_OK is None:
+        try:
+            import threading as _th
+            _t = _th.Thread(target=lambda: None, daemon=True)
+            _t.start()
+            _t.join(timeout=10)
+            _THREADS_OK = True
+        except RuntimeError:
+            _THREADS_OK = False
+    return _THREADS_OK
+
+
 # -- blocking syscalls -------------------------------------------------
 # Pure functions of their arguments: safe to offload to the loop's IO
 # pool when called from a tasklet (genuine async IO — the tasklet parks
@@ -383,11 +408,17 @@ class Interpreter:
         # the event loop, serialized by the scheduler.
         self.threading = threading
         if executor is None and threading != "single":
-            import concurrent.futures as _cf
-            import os as _os
-            workers = max(2, _os.cpu_count() or 2)
-            executor = _cf.ThreadPoolExecutor(max_workers=workers,
-                                              thread_name_prefix="nova-task")
+            if not _threads_available():
+                # No OS threads on this host (e.g. in-browser): degrade
+                # to the single-threaded inline model instead of crashing.
+                threading = "single"
+            else:
+                import concurrent.futures as _cf
+                import os as _os
+                workers = max(2, _os.cpu_count() or 2)
+                executor = _cf.ThreadPoolExecutor(
+                    max_workers=workers, thread_name_prefix="nova-task")
+        self.threading = threading
         self.executor = executor
         if stream_provider is None:
             from .streams import select_stream_provider
@@ -484,6 +515,28 @@ class Interpreter:
             # Root capability grant. Imported modules never get these.
             self.global_env.define("io", VCapability("IO"), False, "cap")
             self.global_env.define("net", VCapability("Net"), False, "cap")
+        if _threads_available():
+            return self._run_with_loop(program, filename)
+        return self._run_inline(program)
+
+    def _run_inline(self, program):
+        # Thread-free hosts (e.g. Pyodide in the browser): no event loop,
+        # no tasklets — run every statement on the calling thread.
+        # current_tasklet() is None throughout, so spawn { } (already
+        # inline in single mode) awaits via future.result(), sleep()
+        # blocks inline, and IO/provider calls run directly instead of
+        # offloading. spawn_async { } raises a clean Nova error.
+        self.loop = None
+        for stmt in program.stmts:
+            if isinstance(stmt, A.Import):
+                continue
+            self.exec_top(stmt)
+        # Structured concurrency: every spawned task completes before
+        # the program exits; un-awaited task failures surface here.
+        self._join_tasks(reraise=True)
+        return self.output
+
+    def _run_with_loop(self, program, filename):
         # v2: the whole program runs as the root tasklet on the
         # cooperative event loop. spawn { } still uses the worker pool
         # for real parallelism; spawn_async { } and async fns are
@@ -491,8 +544,11 @@ class Interpreter:
         loop = EventLoop()
         self.loop = loop
         import concurrent.futures as _cf
-        io_exec = _cf.ThreadPoolExecutor(max_workers=4,
-                                         thread_name_prefix="nova-io")
+        try:
+            io_exec = _cf.ThreadPoolExecutor(max_workers=4,
+                                             thread_name_prefix="nova-io")
+        except RuntimeError:
+            io_exec = None  # threads vanished mid-run; IO runs inline
         loop.io_executor = io_exec
 
         def root_body():
@@ -514,7 +570,8 @@ class Interpreter:
         except DeadlockError as e:
             raise NovaError("R_DEADLOCK", str(e))
         finally:
-            io_exec.shutdown(wait=False)
+            if io_exec is not None:
+                io_exec.shutdown(wait=False)
         # Un-awaited tasklet failures surface here (pool-task failures
         # are already handled by _join_tasks).
         for tl in loop._tasklets:

@@ -16,7 +16,10 @@ def resolve(name, basedir):
     local = os.path.join(basedir, rel)
     if os.path.isfile(local):
         return local
-    std = os.path.join(_STD_DIR, rel)
+    # `import std.web` -> <nova_lang>/std/web.nova (the "std/" prefix is
+    # the stdlib marker, not a real directory level).
+    std_rel = name[4:] + ".nova" if name.startswith("std/") else rel
+    std = os.path.join(_STD_DIR, std_rel)
     if os.path.isfile(std):
         return std
     return None

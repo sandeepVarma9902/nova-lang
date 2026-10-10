@@ -100,21 +100,15 @@
         return withTimeout(Promise.all(loads), TIMEOUT_MS, "source load");
       })
       .then(function () {
-        var fsDbg = "";
-        try {
-          fsDbg = pyodide.runPython(
-            "import os; 'fs:/nova_py=' + str(sorted(os.listdir('/nova_py')))" +
-            " + ' fs:/nova_py/nova_lang=' + str(sorted(os.listdir('/nova_py/nova_lang')))");
-        } catch (e2) { fsDbg = "fs list failed: " + String((e2 && e2.message) || e2); }
         try {
           pyodide.runPython("import sys; sys.path.insert(0, '/nova_py')\n" + HARNESS);
         } catch (e3) {
-          throw new Error(fsDbg + " | import failed: " + String((e3 && e3.message) || e3));
+          throw new Error("interpreter import failed: " + String((e3 && e3.message) || e3));
         }
         // smoke test: the interpreter must actually execute
         pyodide.globals.set("__nova_src", 'print("nova-ok")');
         var res = JSON.parse(pyodide.runPython("nova_run(__nova_src)"));
-        if (!res.ok || res.output.trim() !== "nova-ok") throw new Error(fsDbg + " | smoke test failed: " + JSON.stringify(res).slice(0, 200));
+        if (!res.ok || res.output.trim() !== "nova-ok") throw new Error("smoke test failed: " + JSON.stringify(res).slice(0, 160));
         return true;
       })
       .catch(function (e) {

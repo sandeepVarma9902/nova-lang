@@ -110,7 +110,7 @@ parameters) and returns the declaration under the cursor as Markdown. Every
 hover response says so explicitly:
 
 ````markdown
-```nova
+```nova-norun
 fn greet(name: String) -> String
 ```
 function · declared on line 3 · effect: `pure`

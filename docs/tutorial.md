@@ -134,14 +134,14 @@ print(p == Point(x: 1.0, y: 2.0))   // true — structural equality built in
 
 ## (f) Modules + `nova lock`
 
-```nova
+```nova-norun
 // nova_helpers.nova
 fn greet(name: String) -> String {
   return "Hello, " + name + "!"
 }
 ```
 
-```nova
+```nova-norun
 // app.nova (entry)
 import nova_helpers
 print(nova_helpers.greet("Ada"))   // namespaced — no classpath, no collisions
@@ -166,22 +166,22 @@ fn fib(n: Int) -> Int {
   return fib(n - 1) + fib(n - 2)
 }
 
-effect fn main() {
-  // CPU-bound -> parallel: spawn runs on a worker thread
-  let t = spawn { fib(30) }
-
-  // IO-bound -> async: coordinate with await
-  async fn doubleAll(xs: List[Int]) -> List[Int] {
-    let out: List[Int] = []
-    for x in xs {
-      let s = spawn { x * 2 }
-      out.push(s.await())
-    }
-    return out
+// IO-bound -> async: coordinate with await
+async fn doubleAll(xs: List[Int]) -> List[Int] {
+  let out: List[Int] = []
+  for x in xs {
+    let s = spawn { x * 2 }
+    out.push(s.await())
   }
-
-  print(t.await())
+  return out
 }
+
+// CPU-bound -> parallel: spawn runs on a worker thread
+let t = spawn { fib(20) }
+print(t.await())
+
+// IO-bound -> async: coordinate with await
+print(doubleAll([1, 2, 3]))
 ```
 
 **The rule the compiler enforces:**
@@ -208,6 +208,7 @@ effect fn main() {
     None => print("(empty)")
   }
 }
+main()
 ```
 
 ## (h) ai fn + secret + app.nova + build/deploy — 5 minutes
@@ -223,13 +224,14 @@ ai fn summarize(text: String) -> Summary
   prompt("Summarize in one sentence: " + text)
 }
 
-effect fn run() {
+effect net fn run(net: Net) {
   let s = summarize("Nova is an AI-native language.")
   print(s.headline)
 }
+run(net)
 ```
 
-**Notice:** v1 runs against a deterministic **mock provider** — no network, no key, reproducible output. `ai fn` has `net` effect: from `async` code, spawn-wrap it like any network IO. `prompt(...)` is mandatory in the body (`R_AI_NO_PROMPT` otherwise).
+**Notice:** v1 runs against a deterministic **mock provider** — no network, no key, reproducible output. `ai fn` has `net` effect, so the caller needs `effect net` and a `Net` capability: from `async` code, spawn-wrap it like any network IO. `prompt(...)` is mandatory in the body (`R_AI_NO_PROMPT` otherwise).
 
 **Secrets** are named, never in source:
 
@@ -241,7 +243,7 @@ effect io fn dbPass(io: IO) -> Result[String, String] {
 
 **Manifest** — `app.nova` sits next to your entry file:
 
-```nova
+```nova-norun
 app "myapp" {
   version = "0.1.0"
   entry = "main.nova"
@@ -278,7 +280,7 @@ code-review debates.
 | Module files | snake_case | `helpers.nova` → `import helpers` |
 | Test files | `*_test.nova` | `user_test.nova` (found by `nova test`) |
 
-```nova
+```nova-norun
 // ✅ Do
 class UserService { ... }
 component UserCard(user: User) { ... }

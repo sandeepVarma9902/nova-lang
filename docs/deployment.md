@@ -24,7 +24,7 @@ Validation failures surface as structured diagnostics before anything runs — `
 The demo lives at `examples/deploy-demo/`. Read the two source files first:
 
 **app.nova**
-```nova
+```nova-norun
 app "deploy-demo" {
   version = "0.1.0"
   entry = "main.nova"
