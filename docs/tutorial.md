@@ -1,6 +1,6 @@
 # Learn Nova in 30 minutes
 
-A guided tour for a React developer. Every snippet below is runnable with `nova run <file>.nova` — type it out, run it, break it, read the error. Nova's diagnostics are designed to teach you (each is a stable code + hint, JSON-readable; see SPEC §16).
+You already know React and JavaScript — this tour maps Nova onto what you know. Every snippet runs right here in your browser: hit **Edit & run**, then **Run**. Break things on purpose; the error messages will teach you.
 
 ## (a) Hello + type inference — 2 minutes
 
@@ -21,11 +21,9 @@ fn greet(who: String) -> String {
 print(greet(target))
 ```
 
-**Notice:** `let` is immutable; types are usually inferred, but function *parameters* always need types (the compiler can't guess your API). There is no `any` — Nova never lets a value escape without a type.
+That's the whole deal: `let` never changes (like `const`), types are usually figured out for you, and there's no `any` — every value has a known type. Function parameters always need types, because the compiler can't guess your API.
 
-**Analogy:** `let` ≈ `const`, `var` ≈ `let`. Unlike TypeScript, you almost never write `as`; there are no implicit conversions — `str(pi)` converts a Float to a String explicitly.
-
-## (b) Functions, purity, effects
+## (b) Functions are pure by default
 
 ```nova
 fn double(x: Int) -> Int {   // pure: no side effects allowed
@@ -41,11 +39,9 @@ effect io fn load(path: String, io: IO) -> Result[String, String] {
 }
 ```
 
-**Notice:** Functions are pure by default. A pure function calling `print` is a compile error (`E_EFFECT`). Effect levels nest: `pure < effect < effect io / effect net`. A function's signature is its authority manifest — you can see exactly what a function is allowed to do without reading its body.
+A pure function that tries to `print` is a compile error — you say what a function may do in its signature (`effect`, `effect io`, `effect net`). It's React's pure-render vs `useEffect` split, except the compiler enforces it. Capabilities like `IO` are passed as parameters, so side effects can't sneak in.
 
-**Analogy:** Think of React's separation of pure render vs `useEffect` — except the compiler enforces it, not convention. Capabilities (`IO`, `Net`) are like requiring a prop for side effects: you can't sneak one in.
-
-## (c) Option, Result, `?`, match — the no-null story
+## (c) No null — Option and Result instead
 
 ```nova
 // JS: function getUser(id) { return db.find(id) ?? undefined }
@@ -79,11 +75,9 @@ effect fn greetUser(id: Int) -> Result[String, String] {
 }
 ```
 
-**Notice:** `null`, `nil`, `undefined` don't exist — using one is `E_NO_NULL`. `match` arms must be *exhaustive* (missing `None` is a compile error, `E_NON_EXHAUSTIVE`). `?` propagates `Err`/`None` to the enclosing function, which must itself return `Result`/`Option` — the compiler connects the dots for you.
+`null` and `undefined` don't exist. `match` must handle every case (the compiler checks). `?` is early-return for errors — like `try/catch` without the invisible jumps.
 
-**Analogy:** `Option<T>` ≈ TypeScript's `T | undefined` but enforced: you literally cannot touch the value without handling both arms. `Result` + `?` ≈ `try/catch` flattened — no invisible jumps.
-
-## (d) Your first component: props, state, events, re-render
+## (d) Components: props, state, events
 
 ```nova
 component Counter(title: String) {
@@ -102,11 +96,9 @@ let app = render(Counter(title: "Clicks"))
 app.fire("onClick")   // state → 1, re-renders automatically
 ```
 
-**Notice:** Props are immutable (`title = "x"` is `E_IMMUTABLE`). State is a first-class declaration — order-independent, no rules-of-hooks: you cannot call it "in a loop by accident" because there is no hook call at all. Assignment is an *expression*, so the handler is just `count = count + 1` — no `setCount(c => c + 1)` wrapper. Handlers run with full effects and re-render afterwards.
+Props are immutable. State is declared, not hooked — no rules-of-hooks, no stale closures. The click handler is just an assignment; Nova re-renders after it. (In the playground above, component output also renders as a live browser preview.)
 
-**Analogy:** `component Counter(title: String)` ≈ `function Counter({ title })`. `state count: Int = 0` ≈ `useState(0)` minus the footguns. `<for x in items>` ≈ `.map`, `<if cond>` ≈ ternary.
-
-## (e) Classes, interfaces, data classes
+## (e) Classes without the boilerplate
 
 ```nova
 interface Shape {
@@ -128,11 +120,9 @@ let p = Point(x: 1.0, y: 2.0)
 print(p == Point(x: 1.0, y: 2.0))   // true — structural equality built in
 ```
 
-**Notice:** `let` fields are assigned once in `init`. Methods are pure unless marked `effect`. `data class` gives you fields, construction, `==`, and a readable print — the mechanical parts of a POJO without the boilerplate.
+`interface`, `implements`, `extends` work like Java. `data class` is Java's `record` with `==` that just works.
 
-**Analogy:** `data class` ≈ Java `record`, but with structural `==` out of the box. `interface`/`implements`/`extends` work exactly like Java.
-
-## (f) Modules + `nova lock`
+## (f) Modules
 
 ```nova-norun
 // nova_helpers.nova
@@ -147,18 +137,14 @@ import nova_helpers
 print(nova_helpers.greet("Ada"))   // namespaced — no classpath, no collisions
 ```
 
-`_private` names (leading underscore) are invisible outside their module — `E_IMPORT` if you try. Then pin the supply chain:
+Imports are plain file references (like ES modules). Names starting with `_` stay private to their module. `nova lock` pins every dependency by hash so builds are reproducible:
 
 ```bash
-nova lock app.nova        # hashes every transitive import into nova.lock
-nova run --locked app.nova  # refuses to run if anything was tampered with
+nova lock app.nova            # write hashes into nova.lock
+nova run --locked app.nova    # refuse to run if anything changed
 ```
 
-**Notice:** No `node_modules` abyss: imports are explicit file references, and `nova.lock` makes them content-addressed.
-
-**Analogy:** `import x` ≈ ES modules, `nova.lock` ≈ `package-lock.json` — except it hashes *source files*, not registry tarballs.
-
-## (g) async / spawn / streams
+## (g) Async done right: spawn vs await
 
 ```nova
 fn fib(n: Int) -> Int {
@@ -184,18 +170,9 @@ print(t.await())
 print(doubleAll([1, 2, 3]))
 ```
 
-**The rule the compiler enforces:**
+Two tools, one rule: **`spawn { }` for CPU work** (real parallelism), **`async fn` + `await` for IO** (cooperative, never blocks the loop). The compiler rejects blocking IO inside `async fn` — wrap it in `spawn { }` instead.
 
-| Workload | Construct |
-|---|---|
-| IO-bound (fetch, read, AI calls) | `async fn` + `await` |
-| CPU-bound (fib, image ops, parsing) | `spawn { }` worker pool |
-
-**Notice:** Calling blocking IO *directly* inside an `async fn` is a compile error — `E_ASYNC_BLOCKING` ("wrap it in `spawn { }`"). This is Nova teaching you the architecture: the async function would stall the event loop. `?` may not appear directly in a `spawn` block (`E_QUESTION`) — handle `Result` with `match` inside the task.
-
-**Analogy:** This is Node's event-loop model with teeth. Nova's `async`/`spawn`/`await` are not three spellings of JS's `async/await` — Nova has no `await` keyword floating around promises; `async fn` marks *await-capability*, and `Task[T].await()` blocks the caller. There's nothing like a JS `Promise` — a `Task` is a structured, join-guaranteed computation.
-
-**Streams** (typed pub/sub, Kafka-shaped):
+**Streams** (typed pub/sub):
 
 ```nova
 stream events: String
@@ -211,7 +188,7 @@ effect fn main() {
 main()
 ```
 
-## (h) ai fn + secret + app.nova + build/deploy — 5 minutes
+## (h) AI functions, secrets, deploy
 
 ```nova
 // The return TYPE is the output schema — the provider must conform to it.
@@ -231,9 +208,9 @@ effect net fn run(net: Net) {
 run(net)
 ```
 
-**Notice:** v1 runs against a deterministic **mock provider** — no network, no key, reproducible output. `ai fn` has `net` effect, so the caller needs `effect net` and a `Net` capability: from `async` code, spawn-wrap it like any network IO. `prompt(...)` is mandatory in the body (`R_AI_NO_PROMPT` otherwise).
+An `ai fn` is a typed function whose body is a prompt — the return type is the output schema. It needs the `net` effect and a `Net` capability (AI calls are network calls). This runs against a deterministic mock: no key, no network, same output every time.
 
-**Secrets** are named, never in source:
+Secrets never live in source:
 
 ```nova
 effect io fn dbPass(io: IO) -> Result[String, String] {
@@ -241,7 +218,7 @@ effect io fn dbPass(io: IO) -> Result[String, String] {
 }
 ```
 
-**Manifest** — `app.nova` sits next to your entry file:
+Ship it with a manifest (`app.nova` next to your entry file):
 
 ```nova-norun
 app "myapp" {
@@ -256,7 +233,7 @@ app "myapp" {
 ```
 
 ```bash
-nova build                    # validates manifest, type-checks, stages dist/
+nova build                    # type-checks, stages dist/
 nova deploy --target local    # runs as a process; secrets resolve at runtime
 nova deploy --target docker   # docker build of the staged image
 ```
@@ -265,57 +242,35 @@ Full walkthrough: [deployment.md](./deployment.md).
 
 ## (i) Naming conventions — 2 minutes
 
-Nova takes its naming from the two languages it fuses: types look like
-Java, functions look like JavaScript. One rule per kind of name — no
-code-review debates.
+Types look like Java, functions look like JavaScript. One rule each — no debates:
 
 | Name kind | Style | Example |
 |---|---|---|
-| Classes, interfaces, enums, data classes | PascalCase | `User`, `HttpRequest` |
-| Components | PascalCase | `UserCard`, `Counter` |
-| Functions, methods | camelCase | `getUser`, `calculateTotal` |
-| Variables, parameters | camelCase | `userName`, `retryCount` |
-| Module-level constants | SCREAMING_SNAKE_CASE | `MAX_RETRIES`, `DEFAULT_PORT` |
-| Type parameters | single capital letter | `T`, `E`, `K`, `V` |
-| Module files | snake_case | `helpers.nova` → `import helpers` |
-| Test files | `*_test.nova` | `user_test.nova` (found by `nova test`) |
+| Classes, interfaces, data classes, components | PascalCase | `UserCard`, `HttpRequest` |
+| Functions, methods, variables | camelCase | `getUser`, `retryCount` |
+| Constants (`let`, immutable) | SCREAMING_SNAKE_CASE | `MAX_RETRIES` |
+| Module files | snake_case | `helpers.nova` |
+| Test files | `*_test.nova` | `user_test.nova` |
 
 ```nova-norun
 // ✅ Do
 class UserService { ... }
 component UserCard(user: User) { ... }
 fn getUser(id: Int) -> Option[User] { ... }
-let retryCount = 0
-const MAX_RETRIES = 3
+let MAX_RETRIES = 3               // immutable: SCREAMING_SNAKE_CASE by convention
 
 // ❌ Don't
 class userService { ... }      // types are PascalCase
 fn GetUser(id: Int) { ... }    // functions are camelCase
-let MAX = 3                    // screaming case is for constants only
 ```
 
-Three special rules:
-
-1. **Private is `_`-prefixed** — `_helper`, `_CACHE` are module-private by
-   convention, like Python.
-2. **View tags are CamelCase** — inside a component view, `<UserCard>`
-   works; `<user-card>` is a compile error. The parser enforces this one.
-3. **Acronyms stay readable** — `HttpRequest`, not `HTTPRequest`;
-   `userId`, not `userID`. Treat an acronym like a word.
-
-`nova fmt` fixes your whitespace, not your names — naming is a human
-(and code-review) job. The full normative list lives in SPEC §1.
+Two extras: `_helper` is module-private by convention; acronyms read as words (`HttpRequest`, `userId`). `nova fmt` fixes whitespace, not names.
 
 ---
 
 ## Where next
 
-- **Syntax + type system deep-dive:** SPEC §1–§3
-- **Effects lattice, contracts, `?`:** SPEC §4
-- **Concurrency & async discipline:** SPEC §6
-- **Components:** SPEC §8 · **Classes:** SPEC §9
-- **AI integration:** SPEC §11 · **Secrets/capabilities:** SPEC §12
-- **Manifest + deployment:** SPEC §14, [deployment.md](./deployment.md)
-- **Migrating existing code:** [migration-guide.md](./migration-guide.md) (v1 deliverable)
-- **Skeptical questions answered:** [faq.md](./faq.md)
-- **What's coming in v2:** ROADMAP.md (NovaVM bytecode, cloud deploy targets, managed secrets, cron scheduler, typed context for components)
+- **Why Nova, and how it compares:** [Why Nova for your domain →](./domains.md)
+- **Deep dives:** SPEC §1–§3 (syntax + types) · §4 (effects) · §6 (concurrency) · §8 (components) · §11 (AI) · §14 (deploy)
+- **Migrating existing code:** [migration-guide.md](./migration-guide.md)
+- **Skeptical questions:** [faq.md](./faq.md)

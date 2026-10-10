@@ -16,6 +16,7 @@ SRC = os.path.dirname(HERE)
 PAGES = [
     ("README.md", "docs/overview.html", "Overview"),
     ("docs/tutorial.md", "docs/tutorial.html", "Tutorial — Learn Nova in 30 minutes"),
+    ("docs/domains.md", "docs/domains.html", "Why Nova — by domain"),
     ("docs/faq.md", "docs/faq.html", "FAQ"),
     ("docs/migration-guide.md", "docs/migration-guide.html", "Migration Guide"),
     ("docs/deployment.md", "docs/deployment.html", "Deployment"),

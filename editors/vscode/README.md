@@ -1,50 +1,40 @@
 # Nova for VS Code
 
-Syntax highlighting, snippets, and LSP-powered diagnostics + hover for `.nova` files.
+Write Nova with syntax highlighting, snippets, one-click Run, and LSP diagnostics — right in the editor you already use.
 
-## Features
+## Install (2 minutes)
 
-- **TextMate grammar** (`syntaxes/nova.tmLanguage.json`) — keywords, types, components, view tags, strings, comments, and `null`/`nil`/`undefined` flagged as illegal (Nova has no null).
-- **Snippets** — `component`, `aifn`, `serve`, `stream`, `matchr`, `matcho`, `data`, `effn`, `asyncfn`, `novatest`.
-- **Language server** — `extension.js` launches `nova lsp` over stdio for real diagnostics and hover, using the same checker as `nova check`.
+1. Make sure the `nova` binary works: `nova --version` (repo root has `./nova`).
+2. In this folder: `npm install`
+3. Package it: `npx vsce package`
+4. In VS Code: `Extensions → … → Install from VSIX` and pick the `.vsix` file.
 
-## Install (development)
-
-```bash
-cd editors/vscode
-npm install          # installs vscode-languageclient
-# then in VS Code: Run > Start Debugging, or copy this folder to
-# ~/.vscode/extensions/nova-lang-0.1.0/ and reload.
-```
-
-Make sure the `nova` binary is on your PATH (repo root: `./nova`). If it lives
-elsewhere, set it in settings:
+That's it. The extension finds `nova` on your PATH automatically. If it's somewhere unusual, you'll get a friendly prompt to point at it once — or set it directly:
 
 ```json
 { "nova.serverPath": "/path/to/nova-lang/nova" }
 ```
 
-## Package a .vsix
+## What you get
 
-```bash
-npm install -g @vscode/vsce
-vsce package        # produces nova-lang-0.1.0.vsix
-```
+- **Syntax highlighting** for `.nova` files (keywords, types, components, strings — and `null`/`nil`/`undefined` flagged, because Nova has no null).
+- **10 snippets**: `component`, `aifn`, `serve`, `stream`, `matchr`, `matcho`, `data`, `effn`, `asyncfn`, `novatest`.
+- **LSP diagnostics + hover** from the real Nova checker (`nova lsp`).
+- **Commands** (command palette or right-click): *Nova: Run current file*, *Check current file*, *Format current file*, *Restart language server*. Format-on-save works too.
+- **Status bar**: `$(check) Nova` means the language server is healthy.
 
-Install the `.vsix` via `Extensions > ... > Install from VSIX`, or:
+## Make it yours (settings)
 
-```bash
-code --install-extension nova-lang-0.1.0.vsix
-```
+| Setting | Default | What it does |
+|---|---|---|
+| `nova.serverPath` | `"nova"` | Path to the nova binary (auto-detected from PATH). |
+| `nova.lsp.enabled` | `true` | Turn the language server off if you only want highlighting + snippets. |
+| `nova.lsp.args` | `[]` | Extra args for `nova lsp`. |
+| `nova.run.args` | `[]` | Extra args appended to `nova run <file>`. |
+| `nova.trace.server` | `"off"` | LSP message tracing for debugging. |
 
-## Why VS Code (and not a custom IDE)
-
-Developers already live here. Nova ships `nova lsp` with real diagnostics, so a
-thin client extension gets us highlighting + errors + hover on day one, in the
-editor people actually use. A bespoke IDE is out of scope — deliberately.
+All settings work per-workspace or globally — configure Nova differently for each project.
 
 ## Status
 
-`nova lsp` is experimental; hover is heuristic and completion is not yet
-implemented. Diagnostics (including `E_NO_NULL`, `E_ASYNC_BLOCKING`,
-`E_NOT_SEND`) are real and come straight from the checker.
+`nova lsp` diagnostics and hover are real (straight from the checker). Completion is not implemented yet.

@@ -6,6 +6,8 @@
 - Repository: https://github.com/sandeepVarma9902/nova-lang
 - Documentation: https://sandeepvarma9902.github.io/nova-lang/docs.html
 - Interactive playground: https://sandeepvarma9902.github.io/nova-lang/playground.html
+- AI builder's guide (write correct Nova code): https://sandeepvarma9902.github.io/nova-lang/ai-build.txt
+- Why Nova by domain: https://sandeepvarma9902.github.io/nova-lang/docs/domains.html
 - Guided tour: https://sandeepvarma9902.github.io/nova-lang/tour.html
 - 30-minute tutorial: https://github.com/sandeepVarma9902/nova-lang/blob/main/docs/tutorial.md
 - Full language spec: https://github.com/sandeepVarma9902/nova-lang/blob/main/SPEC.md

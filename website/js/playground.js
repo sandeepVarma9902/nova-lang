@@ -30,13 +30,35 @@
     renderOutput();
   }
 
+  function extractHtml(output) {
+    // Nova render() prints "--- html ---" followed by the compact markup.
+    // Show the last one — it is the final visual state of the component.
+    var last = null, re = /--- html ---\s*\n([^\n]+)/g, m;
+    while ((m = re.exec(output)) !== null) last = m[1].trim();
+    return last && last.charAt(0) === "<" ? last : null;
+  }
+
+  function showPreview(html) {
+    var wrap = $("pg-preview-wrap"), frame = $("pg-preview");
+    if (!wrap || !frame) return;
+    if (!html) { wrap.hidden = true; frame.removeAttribute("srcdoc"); return; }
+    wrap.hidden = false;
+    frame.srcdoc = "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" +
+      "<style>body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:20px;color:#111}" +
+      "button{font:inherit;padding:8px 16px;border-radius:8px;border:1px solid #ccc;background:#f5f5f5;cursor:pointer}" +
+      "h1{font-size:1.4rem;margin:0 0 8px}</style></head><body>" +
+      html + "</body></html>";
+  }
+
   function renderOutput() {
     var ex = examples[current];
     if (!ex) return;
+    showPreview(null);
     if (live) {
       outputEl.innerHTML = "<em>Press Run to execute.</em>";
     } else {
       outputEl.textContent = ex.expected || "(no expected output recorded)";
+      showPreview(extractHtml(ex.expected || ""));
     }
   }
 
@@ -52,10 +74,12 @@
   function runLive() {
     var src = editorEl.value;
     outputEl.innerHTML = "<em>Running&hellip;</em>";
+    showPreview(null);
     try {
       var parsed = window.NovaLive.run(src);
       if (parsed.ok) {
         outputEl.textContent = parsed.output;
+        showPreview(extractHtml(parsed.output));
       } else {
         outputEl.innerHTML = '<span style="color:#f47c7c">' +
           parsed.error.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</span>";
