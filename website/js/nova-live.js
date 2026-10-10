@@ -84,14 +84,17 @@
         }), TIMEOUT_MS, "source manifest");
       })
       .then(function (files) {
+        // Recreate the real package layout: /nova_py/nova_lang/*.py, so
+        // `from nova_lang.checker import ...` and relative imports work.
         try { pyodide.FS.mkdir("/nova_py"); } catch (e) { /* exists */ }
+        try { pyodide.FS.mkdir("/nova_py/nova_lang"); } catch (e) { /* exists */ }
         var loads = files.filter(function (f) { return f !== "files.json"; })
           .map(function (f) {
             return fetch(base + f).then(function (r) {
               if (!r.ok) throw new Error("missing " + f);
               return r.text();
             }).then(function (text) {
-              pyodide.FS.writeFile("/nova_py/" + f, text);
+              pyodide.FS.writeFile("/nova_py/nova_lang/" + f, text);
             });
           });
         return withTimeout(Promise.all(loads), TIMEOUT_MS, "source load");
