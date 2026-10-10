@@ -13,7 +13,16 @@ import datetime
 import json as _json
 import os
 import re
-import sqlite3
+
+
+def _sqlite3():
+    # Imported lazily: Pyodide (browser) ships sqlite3 as an optional
+    # package, so importing this module must not require it.
+    try:
+        import sqlite3
+    except ImportError as e:
+        raise DbError("sqlite3 is not available on this platform (%s)" % e)
+    return sqlite3
 
 
 class DbError(Exception):
@@ -68,7 +77,7 @@ def pull_sqlite(dsn, out_path):
     _, path = parse_dsn(dsn)
     if not os.path.isfile(path):
         raise DbError("sqlite file not found: %s" % path)
-    conn = sqlite3.connect(path)
+    conn = _sqlite3().connect(path)
     try:
         tables = [r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
@@ -212,8 +221,9 @@ def open_db(dsn):
     if driver != "sqlite":
         raise DbError("driver '%s' not implemented" % driver)
     try:
-        conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
+        _s3 = _sqlite3()
+        conn = _s3.connect(path)
+        conn.row_factory = _s3.Row
     except Exception as e:
         raise DbError("open %s: %s" % (path, e))
     return VDb(conn)
