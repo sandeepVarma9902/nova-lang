@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download — Nova</title>
+<meta name="description" content="Install the Nova programming language. Python 3.10+, zero dependencies.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="tour.html">Tour</a>
+      <a href="snippets.html">Snippets</a>
+      <a href="playground.html">Playground</a>
+      <a href="docs.html">Docs</a>
+      <a href="download.html" class="cta active">Download</a>
+    </div>
+  </nav>
+</header>
+
+<main>
+<section class="hero" style="padding-bottom:20px">
+  <h1>Get Nova</h1>
+  <p class="sub">One requirement: Python 3.10 or newer. Zero dependencies &mdash; the entire toolchain is stdlib-only.</p>
+</section>
+
+<section class="section">
+<div class="dl-box">
+  <h3>Install in 30 seconds</h3>
+<pre><code class="language-bash">git clone https://github.com/sandeepvarma9902/nova-lang.git
+cd nova-lang
+./nova run examples/hello.nova     # Hello, Nova!</code></pre>
+  <p style="color:var(--muted)">No pip install. No build step. No toolchain maze &mdash; the thing Nova was built to kill.</p>
+</div>
+
+<div class="dl-box">
+  <h3>Your first program</h3>
+<pre><code class="language-nova">// hello.nova
+let target = "Nova"
+print("Hello, " + target + "!")</code></pre>
+<pre><code class="language-bash">./nova run hello.nova
+# Hello, Nova!</code></pre>
+</div>
+
+<div class="dl-box">
+  <h3>The one command</h3>
+  <p style="color:var(--muted)">Everything lives behind <code>nova</code>:</p>
+<pre><code class="language-bash">nova run app.nova              # run a program (or .nvb bytecode)
+nova check app.nova            # type-check; diagnostics as JSON
+nova fmt app.nova              # canonical formatting
+nova lock app.nova             # pin imports by hash
+nova build --emit-bytecode     # compile to portable .nvb
+nova dom app.nova -o app.html  # components -&gt; self-contained HTML
+nova deploy --target docker    # local | docker | aws | gcp
+nova eval suite.json           # eval harness for ai fns
+nova lsp                       # language server (editor support)
+nova migrate --from java|jsx   # experimental mechanical migrator</code></pre>
+</div>
+
+<div class="dl-box">
+  <h3>Editors</h3>
+  <p style="color:var(--muted)">The <a href="docs/v2-lsp.html">Nova VS Code extension</a> ships a TextMate grammar, snippets, and an LSP client wired to <code>nova lsp</code> for real diagnostics and hover. See <code>editors/vscode/README.md</code> in the repo.</p>
+</div>
+
+<div class="hero-ctas">
+  <a class="btn btn-primary" href="docs/tutorial.html">Learn Nova in 30 minutes</a>
+  <a class="btn btn-ghost" href="playground.html">Try it in your browser first</a>
+</div>
+</section>
+</main>
+
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snippet library — Nova</title>
+<meta name="description" content="Copy-paste Nova snippets: services, components, AI functions, streams, error handling, migrations.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="tour.html">Tour</a>
+      <a href="snippets.html" class="active">Snippets</a>
+      <a href="playground.html">Playground</a>
+      <a href="docs.html">Docs</a>
+      <a href="download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+
+<main>
+<section class="hero" style="padding-bottom:20px">
+  <h1>Snippet library</h1>
+  <p class="sub">Production-shaped Nova, ready to copy. Every snippet runs with <code>nova run</code>.</p>
+</section>
+
+<section class="section">
+
+<div class="snippet">
+  <h3>Service entrypoint <span class="pill pill-plat">backend</span></h3>
+  <p class="desc">The shape of a Nova service: an <code>effect fn main</code> with explicit capabilities &mdash; IO and network arrive as parameters, never ambient authority.</p>
+<pre><code class="language-nova">// main.nova — a service that fetches, transforms, stores.
+effect net fn fetchUsers(net: Net) -> Result[List[String], String] {
+  let body = fetch("https://api.example.com/users", net)?
+  return Ok(parseUsers(body))
+}
+
+effect fn main(io: IO, net: Net) {
+  match fetchUsers(net) {
+    Ok(users) => {
+      writeFile("users.txt", join(users, "\n"), io)
+      print("stored " + str(len(users)) + " users")
+    },
+    Err(e) => print("failed: " + e)
+  }
+}
+main()</code></pre>
+</div>
+
+<div class="snippet">
+  <h3>Counter component <span class="pill pill-react">frontend</span></h3>
+  <p class="desc">React's component model, Java's types, none of the hook rules. State is compiler-managed and order-independent.</p>
+<pre><code class="language-nova">component Counter(title: String) {
+  state count: Int = 0
+
+  view {
+    &lt;div&gt;
+      &lt;h1&gt;{title}&lt;/h1&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={count = count + 1}&gt;Increment&lt;/button&gt;
+    &lt;/div&gt;
+  }
+}
+
+effect fn main() {
+  let app = render(Counter(title: "Clicks"))
+  app.fire("onClick")
+  app.fire("onClick")
+}
+main()</code></pre>
+</div>
+
+<div class="snippet">
+  <h3>AI function with typed output <span class="pill pill-ai">ai-native</span></h3>
+  <p class="desc">The return type is the output schema. The provider must return structured data conforming to <code>Summary</code> &mdash; parsing roulette is over.</p>
+<pre><code class="language-nova">data class Summary(headline: String, score: Float)
+
+ai fn summarize(text: String) -&gt; Summary
+  model = "nova-mock-1"
+  temperature = 0.3
+{
+  prompt("Summarize in one sentence: " + text)
+}
+
+effect fn main() {
+  let s = summarize("Nova is a programming language designed by AI, for AI.")
+  print(s.headline)
+  print("score: " + str(s.score))
+}
+main()</code></pre>
+</div>
+
+<div class="snippet">
+  <h3>Streams pub/sub <span class="pill pill-plat">platform</span></h3>
+  <p class="desc">Kafka-style topics, consumer groups and offsets &mdash; in the standard library. Same code runs on the in-memory provider locally and real Kafka in production.</p>
+<pre><code class="language-nova">stream events: String
+
+effect fn drain(sub: Subscription[String], count: Int) -> Int {
+  return match sub.poll() {
+    None => count,
+    Some(msg) => {
+      print(msg.value)
+      sub.commit(msg)
+      drain(sub, count + 1)
+    }
+  }
+}
+
+effect fn main() {
+  let sub = events.subscribe(group: "workers")
+  events.publish("hello")
+  events.publish(key: "k1", value: "world")
+  print("drained: " + str(drain(sub, 0)))
+}
+main()</code></pre>
+</div>
+
+<div class="snippet">
+  <h3>Result error handling <span class="pill pill-fix">errors</span></h3>
+  <p class="desc">Failure in the signature, propagation with <code>?</code>, exhaustive handling with <code>match</code>. No exception tax, no silent <code>undefined</code>.</p>
+<pre><code class="language-nova">effect fn fetchUser(id: Int) -> Result[String, String] {
+  if id == 1 { return Ok("Ada") }
+  return Err("user " + str(id) + " not found")
+}
+
+effect fn greetUser(id: Int) -> Result[String, String] {
+  let name = fetchUser(id)?   // Err returns early from greetUser
+  return Ok("Hello, " + name + "!")
+}
+
+effect fn main() {
+  match greetUser(1) {
+    Ok(msg) => print(msg),
+    Err(e)  => print("Error: " + e)
+  }
+  match greetUser(7) {
+    Ok(msg) => print(msg),
+    Err(e)  => print("Error: " + e)
+  }
+}
+main()</code></pre>
+</div>
+
+<div class="snippet">
+  <h3>Java POJO &rarr; Nova <span class="pill pill-java">migration</span></h3>
+  <p class="desc">The poster child of <code>nova migrate</code>: forty lines of getters, setters, equals and hashCode become one declaration. See the full mapping tables in the migration guide.</p>
+  <div class="snippet-grid">
+    <div>
+      <div class="ba-label">Before &mdash; Java</div>
+<pre><code class="language-java">public class Point {
+  private double x;
+  private double y;
+  public Point(double x, double y) {
+    this.x = x; this.y = y;
+  }
+  public double getX() { return x; }
+  public double getY() { return y; }
+  // + equals + hashCode + toString
+  //   (~40 lines total)
+}</code></pre>
+    </div>
+    <div>
+      <div class="ba-label">After &mdash; Nova</div>
+<pre><code class="language-nova">data class Point(x: Float, y: Float)
+
+let p = Point(x: 1.0, y: 2.0)
+print(p)                          // Point(x: 1.0, y: 2.0)
+print(p == Point(x: 1.0, y: 2.0)) // true</code></pre>
+    </div>
+  </div>
+</div>
+
+<div class="snippet">
+  <h3>React useState &rarr; Nova <span class="pill pill-react">migration</span></h3>
+  <p class="desc">Hooks become declarations. There is nothing to memorize about call order because there is no call order.</p>
+  <div class="snippet-grid">
+    <div>
+      <div class="ba-label">Before &mdash; React</div>
+<pre><code class="language-java">function Counter({ title }) {
+  const [count, setCount] = useState(0);
+  // don't call me conditionally.
+  // don't call me in a loop. good luck.
+  return (
+    &lt;div&gt;
+      &lt;h1&gt;{title}&lt;/h1&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={() =&gt; setCount(c =&gt; c + 1)}&gt;
+        Increment
+      &lt;/button&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+    </div>
+    <div>
+      <div class="ba-label">After &mdash; Nova</div>
+<pre><code class="language-nova">component Counter(title: String) {
+  state count: Int = 0   // declare anywhere, in any order
+
+  view {
+    &lt;div&gt;
+      &lt;h1&gt;{title}&lt;/h1&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={count = count + 1}&gt;
+        Increment
+      &lt;/button&gt;
+    &lt;/div&gt;
+  }
+}</code></pre>
+    </div>
+  </div>
+</div>
+
+</section>
+</main>
+
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="js/main.js"></script>
+</body>
+</html>

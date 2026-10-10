@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kafka Streams Provider — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1>Nova streams on real Kafka (v2 provider)</h1>
+<p><code>NOVA_STREAMS=kafka</code> swaps the in-memory stream provider for <code>nova_lang/kafka_provider.py</code>: a real Kafka wire-protocol client written with <strong>only the Python standard library</strong> (<code>socket</code> + <code>struct</code>). Same Nova code — <code>stream</code>, <code>publish</code>, <code>subscribe</code>, <code>poll</code>, <code>commit</code> — now talks to a real broker.</p>
+<h2>What works</h2>
+<ul>
+<li><strong>Produce</strong> (<code>stream.publish(...)</code>) — Kafka Produce API <strong>v2</strong>, <code>acks=1</code>,</li>
+</ul>
+<p>  one v2 record batch (magic=2) per publish, CRC32C checksummed. Returns the   broker-assigned base offset.</p>
+<ul>
+<li><strong>Fetch</strong> (<code>subscription.poll()</code>) — Kafka Fetch API <strong>v4</strong>,</li>
+</ul>
+<p>  <code>READ_UNCOMMITTED</code>, from the group&#x27;s committed offset + 1. Fetched records   are buffered client-side so consecutive <code>poll()</code> calls each return one   message, matching the in-memory provider&#x27;s contract.</p>
+<ul>
+<li><strong>Bootstrap &amp; leader discovery</strong> — tries each <code>NOVA_KAFKA_BOOTSTRAP</code></li>
+</ul>
+<p>  host in order, runs <strong>ApiVersions v0</strong> to negotiate, then <strong>Metadata v1</strong>   to find the partition leader. Metadata is refreshed automatically on   <code>NOT_LEADER_FOR_PARTITION</code> / <code>UNKNOWN_TOPIC_OR_PARTITION</code> and the request   is retried once.</p>
+<ul>
+<li><strong>Version safety</strong> — the provider requires the broker to support Produce</li>
+</ul>
+<p>  v2, Fetch v4 and Metadata v1 (any modern Kafka ≥ 2.x and Redpanda do) and   fails fast with a clear error otherwise.</p>
+<ul>
+<li><strong>Serialization</strong> — Nova <code>String</code> keys/values are UTF-8 on the wire;</li>
+</ul>
+<p>  <code>None</code> keys become null. Non-UTF-8 payloads from other producers are   returned as raw bytes rather than crashing.</p>
+<ul>
+<li><strong>Threading</strong> — one lock guards connections, correlation ids and group</li>
+</ul>
+<p>  state, like the memory provider.</p>
+<h2>What it needs</h2>
+<table><thead><tr><th>Env var</th><th>Required</th><th>Default</th><th>Meaning</th></tr></thead><tbody><tr><td><code>NOVA_STREAMS</code></td><td>to select</td><td><code>memory</code></td><td>set to <code>kafka</code> for this provider</td></tr><tr><td><code>NOVA_KAFKA_BOOTSTRAP</code></td><td><strong>yes</strong></td><td>—</td><td><code>host:port[,host:port...]</code>; clear error if unset</td></tr><tr><td><code>NOVA_KAFKA_CLIENT_ID</code></td><td>no</td><td><code>nova</code></td><td>Kafka <code>client.id</code></td></tr><tr><td><code>NOVA_KAFKA_CONNECT_TIMEOUT_MS</code></td><td>no</td><td><code>10000</code></td><td>TCP connect timeout</td></tr><tr><td><code>NOVA_KAFKA_REQUEST_TIMEOUT_MS</code></td><td>no</td><td><code>30000</code></td><td>per-request socket timeout</td></tr><tr><td><code>NOVA_KAFKA_FETCH_MAX_WAIT_MS</code></td><td>no</td><td><code>1000</code></td><td>fetch long-poll wait</td></tr><tr><td><code>NOVA_KAFKA_FETCH_MAX_BYTES</code></td><td>no</td><td><code>1048576</code></td><td>fetch size cap</td></tr><tr><td><code>NOVA_KAFKA_PARTITION</code></td><td>no</td><td><code>0</code></td><td>the single partition used per topic</td></tr></tbody></table>
+<ul>
+<li><strong>The topic must exist</strong>, or the broker must have topic auto-creation</li>
+</ul>
+<p>  enabled (<code>auto.create.topics.enable=true</code>, the default in Apache Kafka).   The provider does not create topics (no CreateTopics admin API yet).</p>
+<ul>
+<li><strong>PLAINTEXT only.</strong> No SASL, no TLS — the provider speaks the raw binary</li>
+</ul>
+<p>  protocol over plain TCP.</p>
+<ul>
+<li><strong>One partition per topic</strong> (configurable via <code>NOVA_KAFKA_PARTITION</code>).</li>
+</ul>
+<p>  Nova&#x27;s ordered-log contract maps onto a single partition&#x27;s log; the   provider does not fan out across partitions.</p>
+<h2>What is NOT implemented (honest list)</h2>
+<ul>
+<li><strong>Consumer groups / OffsetCommit</strong> — <code>commit()</code> is tracked **client-side,</li>
+</ul>
+<p>  in memory**, exactly like the memory provider&#x27;s semantics. Restart the   process and group cursors reset to the beginning. Real consumer-group   rebalancing is roadmap work.</p>
+<ul>
+<li><strong>Transactions, idempotent producer</strong> — <code>acks=1</code>, no <code>producer.id</code>.</li>
+<li>**SASL/TLS, compression, CreateTopics/DeleteTopics admin, fetch sessions,</li>
+</ul>
+<p>  multi-partition produce/fetch.**</p>
+<h2>Verification status</h2>
+<p>There was <strong>no live broker available when this was written</strong>, so the implementation is correct-by-construction against the Kafka protocol guide (ApiVersions v0, Metadata v1, Produce v2, Fetch v4, v2 record batches — all field layouts verified against https://kafka.apache.org/protocol.html) plus <strong>28 unit tests</strong> (<code>tests/test_kafka_provider.py</code>) that drive the provider with a fake socket:</p>
+<ul>
+<li>exact request bytes asserted field-by-field (length prefixes, api keys,</li>
+</ul>
+<p>  <code>acks=1</code>, <code>isolation_level=0</code>, fetch offsets, record batch layout);</p>
+<ul>
+<li>canned broker responses parsed back (version map, leader endpoints,</li>
+</ul>
+<p>  produce offsets, fetch records with absolute offsets);</p>
+<ul>
+<li>end-to-end <code>publish → poll → poll → commit → poll</code> against the fake</li>
+</ul>
+<p>  transport, including independent consumer groups and correlation-id   mismatch detection;</p>
+<ul>
+<li>CRC32C verified against the standard check vector</li>
+</ul>
+<p>  (<code>crc32c(b&quot;123456789&quot;) == 0xE3069283</code>) and corrupt batches rejected.</p>
+<p><strong>Before trusting this in production, run the walkthrough below against a real broker</strong> — that live round-trip is the one verification the fake transport cannot give.</p>
+<h2>Walkthrough: Nova + local Kafka</h2>
+<pre><code class="language-bash">cd ~/workspace/nova-lang
+
+# 1. Start a single-node KRaft broker (no ZooKeeper needed)
+docker compose -f docker-compose.kafka.yml up -d
+
+# 2. Wait for it to be ready, then create the topic Nova will use
+#    (skip this if you rely on auto.create.topics.enable=true,
+#    which the compose file already sets)
+docker exec nova-kafka /opt/kafka/bin/kafka-topics.sh \
+  --create --topic events --bootstrap-server localhost:9092
+
+# 3. Run the streams example against the broker
+NOVA_STREAMS=kafka NOVA_KAFKA_BOOTSTRAP=localhost:9092 \
+  ./nova run examples/streams.nova
+# EXPECT:
+# hello
+# (no key)
+# world
+# key=k1
+# 2
+
+# 4. Confirm the records really landed on the broker
+docker exec nova-kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 --topic events --from-beginning
+
+# 5. Shut it down
+docker compose -f docker-compose.kafka.yml down</code></pre>
+<p>Notes:</p>
+<ul>
+<li><code>stream events: String</code> maps 1:1 to the Kafka topic <code>events</code></li>
+</ul>
+<p>  (the declared <code>topic</code> name, or the stream name).</p>
+<ul>
+<li>If <code>NOVA_KAFKA_BOOTSTRAP</code> is unset you get:</li>
+</ul>
+<p>  <code>NOVA_STREAMS=kafka requires NOVA_KAFKA_BOOTSTRAP to be set, e.g.   NOVA_KAFKA_BOOTSTRAP=localhost:9092 ...</code></p>
+<ul>
+<li>If the topic doesn&#x27;t exist and auto-creation is off, <code>publish</code> raises</li>
+</ul>
+<p>  <code>KafkaError: metadata for topic &#x27;events&#x27; failed:   UNKNOWN_TOPIC_OR_PARTITION (create the topic first, or enable the   broker&#x27;s auto.create.topics.enable)</code>.</p>
+<ul>
+<li>Redpanda speaks the same wire protocol and should work wherever it</li>
+</ul>
+<p>  supports these API versions; it has not been tested here.</p>
+<h2>Files</h2>
+<ul>
+<li><code>nova_lang/kafka_provider.py</code> — the provider (stdlib only)</li>
+<li><code>nova_lang/streams.py</code> — <code>select_stream_provider()</code> (<code>NOVA_STREAMS</code>)</li>
+<li><code>tests/test_kafka_provider.py</code> — 28 tests, fake-socket transport</li>
+<li><code>docker-compose.kafka.yml</code> — local single-node broker</li>
+</ul>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>

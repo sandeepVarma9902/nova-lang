@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playground — Nova</title>
+<meta name="description" content="Try Nova in your browser: editable examples run on the real interpreter.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="tour.html">Tour</a>
+      <a href="snippets.html">Snippets</a>
+      <a href="playground.html" class="active">Playground</a>
+      <a href="docs.html">Docs</a>
+      <a href="download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+
+<main>
+<section class="hero" style="padding-bottom:20px">
+  <h1>Playground</h1>
+  <p class="sub">Editable examples, executed by the real Nova interpreter &mdash; right here in your browser via Pyodide.</p>
+</section>
+
+<section class="section">
+  <div id="pg-status" class="pg-status">Loading&hellip;</div>
+  <div class="pg-layout">
+    <div class="pg-examples" id="pg-examples"></div>
+    <div>
+      <textarea id="pg-editor" class="pg-editor" spellcheck="false"></textarea>
+      <div class="pg-run">
+        <button id="pg-run-btn" class="btn btn-primary" disabled>Run</button>
+      </div>
+      <h4 style="margin:0 0 8px">Output</h4>
+      <pre id="pg-output" class="pg-output"><em>Loading&hellip;</em></pre>
+    </div>
+  </div>
+  <p style="color:var(--muted);font-size:.85rem;margin-top:24px">
+    The playground loads the actual <code>nova_lang</code> interpreter package (the same code <code>./nova run</code> uses)
+    into Pyodide. It needs this page served over HTTP with network access to the Pyodide CDN &mdash;
+    open it from <code>file://</code> or offline and it degrades gracefully to static examples.
+  </p>
+</section>
+</main>
+
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="js/main.js"></script>
+<script type="module" src="js/playground.js"></script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloud Deployment — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1>Cloud deploy targets — <code>nova deploy --target aws|gcp</code></h1>
+<p>v2 generators in <code>nova_lang/deploy_cloud.py</code>: <code>generate_aws(man, man_path, out_dir)</code> and <code>generate_gcp(man, man_path, out_dir)</code> read <code>app.nova</code> and write real, runnable deployment artifacts. (The <code>nova deploy --target aws|gcp</code> CLI wiring lands separately — these functions are what it will call.)</p>
+<p>Convention: generate into <code>&lt;appdir&gt;/deploy/aws</code> (or <code>/deploy/gcp</code>). The generated <code>deploy.sh</code> derives the app dir as <code>&lt;out&gt;/../..</code>, so the Docker build context is the app tree holding <code>nova_lang/</code>, the <code>nova</code> script, and <code>app.nova</code>.</p>
+<h2>What each target generates</h2>
+<h3>AWS (<code>--target aws</code>)</h3>
+<table><thead><tr><th>File</th><th>What it is</th></tr></thead><tbody><tr><td><code>Dockerfile</code></td><td><code>python:3.12-slim</code> (or <code>docker { base }</code>), copies the Nova toolchain (pure Python, stdlib only — no pip installs) + entry, its transitive imports, and every cron <code>run</code> file into <code>/app</code>, sets <code>NOVA_THREADING</code>, exposes the docker port, <code>CMD [&quot;nova&quot;, &quot;run&quot;, &quot;&lt;entry&gt;&quot;]</code></td></tr><tr><td><code>task-definition.json</code></td><td>ECS Fargate task definition: <code>awsvpc</code>, 256 CPU / 512 MiB, image URI rendered by <code>deploy.sh</code>, env vars from the manifest <code>env prod</code> block (falling back to <code>env dev</code>), keys uppercased. <code>resource secret</code> entries become <code>NOVA_SECRET_&lt;NAME&gt;</code> entries with a <code>FILL_IN</code> Secrets-Manager-ARN placeholder. awslogs driver.</td></tr><tr><td><code>service.json</code></td><td>Service sketch (desired count 1, Fargate, awsvpc) — the actual <code>create-service</code>/<code>update-service</code> command lives in <code>deploy.sh</code> with your cluster/subnets/security groups.</td></tr><tr><td><code>deploy.sh</code></td><td>Executable. Refuses to run while any <code>FILL_IN</code> placeholder is unchanged. Then: verifies <code>aws</code> credentials (<code>aws sts get-caller-identity</code>), creates the ECR repo if missing, logs docker in, builds + pushes the image, renders the image URI into the task definition, registers it, creates the <code>/ecs/&lt;app&gt;</code> log group, creates or updates the ECS service, and creates one <strong>EventBridge Scheduler</strong> schedule per <code>resource cron</code> (<code>aws scheduler create-schedule</code>, idempotent create-or-update), targeting the same task definition with the container command overridden to <code>nova run &lt;cron-file&gt;</code>.</td></tr></tbody></table>
+<p>Cron schedule conversion: the manifest&#x27;s 5-field cron (<code>0 2 <em> </em> <em></code>) becomes the EventBridge 6-field form <code>cron(0 2 </em> <em> ? </em>)</code> (one of day-of-month/day-of-week must be <code>?</code>; generation errors out honestly if your schedule pins both).</p>
+<h3>GCP (<code>--target gcp</code>)</h3>
+<table><thead><tr><th>File</th><th>What it is</th></tr></thead><tbody><tr><td><code>Dockerfile</code></td><td>Same shape as AWS (Nova toolchain + app sources, entry as CMD).</td></tr><tr><td><code>service.yaml</code></td><td>Declarative Cloud Run service sketch (knative <code>Service</code>) — the equivalent of what <code>deploy.sh</code> does via flags. <code>%IMAGE_URI%</code> is filled by the script; secret refs are commented sketches you fill in by hand.</td></tr><tr><td><code>deploy.sh</code></td><td>Executable. Guards placeholders, checks <code>gcloud</code> + login (<code>gcloud auth login</code>), creates the Artifact Registry repo if missing, <code>docker build</code> + push, then <code>gcloud run deploy</code> with <code>--set-env-vars</code> from the <code>env prod</code> (or <code>env dev</code>) block, captures the service URL, and creates one <strong>Cloud Scheduler</strong> HTTP job per <code>resource cron</code> (<code>gcloud scheduler jobs create http</code>, idempotent create-or-update), POSTing to <code>&lt;service-url&gt;/cron/&lt;name&gt;</code>.</td></tr></tbody></table>
+<h2>Exactly what YOU must supply</h2>
+<p><strong>Both targets:</strong></p>
+<ul>
+<li>Your app&#x27;s <code>app.nova</code>, entry file, and the Nova toolchain next to it</li>
+</ul>
+<p>  (the script needs <code>nova_lang/</code> and the <code>nova</code> launcher in the app dir).</p>
+<ul>
+<li>Non-secret config lives in <code>env prod { }</code> (falls back to <code>env dev</code>)</li>
+</ul>
+<p>  and is baked in as env vars automatically.</p>
+<ul>
+<li>Secrets are never in the manifest: <code>resource secret</code> names resolve to</li>
+</ul>
+<p>  <code>NOVA_SECRET_&lt;NAME&gt;</code> at runtime. You create the secret in Secrets   Manager (AWS) / Secret Manager (GCP) and paste the real ARN/path into   the placeholders before running.</p>
+<p><strong>AWS — fill in <code>deploy/aws/deploy.sh</code> + <code>task-definition.json</code>:</strong> <code>AWS_REGION</code>, <code>ACCOUNT_ID</code>, <code>ECR_REPO</code>, <code>CLUSTER_NAME</code>, <code>SUBNETS</code>, <code>SECURITY_GROUPS</code> (comma-separated), <code>SCHED_ROLE_ARN</code> (IAM role EventBridge Scheduler assumes); in <code>task-definition.json</code>: <code>executionRoleArn</code>, each secret&#x27;s Secrets-Manager ARN, the awslogs region. Prerequisites: <code>aws configure</code> (credentials), docker, an ECS cluster, a VPC with public subnets + a security group.</p>
+<p><strong>GCP — fill in <code>deploy/gcp/deploy.sh</code>:</strong> <code>PROJECT_ID</code>, <code>REGION</code>, <code>AR_REPO</code>. Prerequisites: <code>gcloud auth login</code>, a project with Cloud Run + Artifact Registry + Cloud Scheduler APIs enabled and billing on, docker.</p>
+<h2>What isn&#x27;t automated</h2>
+<ul>
+<li>IAM roles and policies (task execution role, scheduler role) — you</li>
+</ul>
+<p>  create them in the console/IaC and paste the ARNs.</p>
+<ul>
+<li>VPC networking beyond placeholders (AWS): subnets/security groups are</li>
+</ul>
+<p>  inputs, not provisioned.</p>
+<ul>
+<li>Secrets themselves: created by you in the provider&#x27;s secret store,</li>
+</ul>
+<p>  then referenced.</p>
+<ul>
+<li>GCP cron webhooks: the deployed image runs <code>nova run &lt;entry&gt;</code>, which</li>
+</ul>
+<p>  is <strong>not an HTTP server</strong>. Cloud Scheduler jobs POST to   <code>&lt;service-url&gt;/cron/&lt;name&gt;</code>; the app must expose that endpoint (or you   point the jobs elsewhere) before the schedules fire usefully. This is   stated in the script itself.</p>
+<ul>
+<li>DNS / custom domains, TLS, scaling policy beyond max-instances=10</li>
+</ul>
+<p>  (GCP), multi-region, rollbacks.</p>
+<h2>Honest limits</h2>
+<ul>
+<li>The scripts are <code>set -euo pipefail</code> and idempotent (create-or-update</li>
+</ul>
+<p>  for services and schedules), but they have only been syntax-checked   (<code>bash -n</code>) — not run against real AWS/GCP accounts.</p>
+<ul>
+<li>Env-var values with <code>=</code>, commas, or quotes may break the</li>
+</ul>
+<p>  <code>--set-env-vars</code> flag on GCP and the JSON round-trip on AWS; keep   deployment env vars simple or escape them by hand.</p>
+<ul>
+<li>Cron schedules that pin both day-of-month and day-of-week are rejected</li>
+</ul>
+<p>  for AWS (EventBridge forbids it); simplify to pin one.</p>
+<ul>
+<li>Docker builds need the network (pulls <code>python:3.12-slim</code>) and must run</li>
+</ul>
+<p>  on a machine with docker + the CLIs — the VM here can generate the   artifacts but <code>docker</code>/<code>aws</code>/<code>gcloud</code> may not be installed.</p>
+<ul>
+<li><code>deploy target = &quot;aws&quot;|&quot;gcp&quot;</code> in <code>app.nova</code> is not yet a recognized</li>
+</ul>
+<p>  manifest value — the CLI wiring is a separate step; generation works   today via the Python API.</p>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>

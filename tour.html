@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Language tour — Nova</title>
+<meta name="description" content="A guided tour of the Nova programming language: types, components, effects, streams, AI integration.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="tour.html" class="active">Tour</a>
+      <a href="snippets.html">Snippets</a>
+      <a href="playground.html">Playground</a>
+      <a href="docs.html">Docs</a>
+      <a href="download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+
+<main>
+<section class="hero" style="padding-bottom:20px">
+  <h1>The tour</h1>
+  <p class="sub">Thirteen stops, zero fluff. Every snippet below is real Nova &mdash; copy it, run it with <code>nova run</code>, break it, learn.</p>
+</section>
+
+<section class="section">
+
+<div class="tour-step">
+<h3>1. Values with inference</h3>
+<p>Statically typed like Java. Terse like the language Java wishes it was. <code>let</code> infers; annotate when it helps the reader.</p>
+<pre><code class="language-nova">let greeting: String = "Hello"
+let target = "Nova"        // inferred: String
+let year: Int = 2026
+let pi = 3.14159           // inferred: Float
+// year = "2027"           // E_TYPE: the compiler says no. Good.</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>2. Functions are pure by default</h3>
+<p>No effects unless you declare them. A plain <code>fn</code> cannot touch the network, the disk, or your state &mdash; the checker proves it.</p>
+<pre><code class="language-nova">fn add(a: Int, b: Int) -> Int {
+  return a + b
+}
+
+effect fn save(path: String, data: String, io: IO) {
+  writeFile(path, data, io)   // needs the IO capability, passed explicitly
+}</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>3. There is no null</h3>
+<p>The billion-dollar mistake doesn't compile. Absence is <code>Option[T]</code>, and the compiler forces you to handle both arms.</p>
+<pre><code class="language-nova">fn findUser(id: Int) -> Option[String] {
+  if id == 1 { return Some("Ada") }
+  return None
+}
+
+match findUser(7) {
+  Some(name) => print("Found: " + name),
+  None       => print("Not on the list")   // you cannot forget this arm
+}
+// null          // E_NO_NULL: "Nova has no null. Use Option[T]."</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>4. Errors without ceremony</h3>
+<p>Fallible functions return <code>Result[T, E]</code>. The <code>?</code> operator propagates failure; the happy path stays linear.</p>
+<pre><code class="language-nova">effect fn fetchUser(id: Int) -> Result[String, String] {
+  if id == 1 { return Ok("Ada") }
+  return Err("user " + str(id) + " not found")
+}
+
+effect fn greetUser(id: Int) -> Result[String, String] {
+  let name = fetchUser(id)?   // Err returns early, automatically
+  return Ok("Hello, " + name + "!")
+}</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>5. Data classes in one line</h3>
+<p>Java's 40-line POJO &mdash; fields, constructor, equality, readable printing &mdash; is a single declaration.</p>
+<pre><code class="language-nova">data class Point(x: Float, y: Float)
+
+let p = Point(x: 1.0, y: 2.0)
+print(p == Point(x: 1.0, y: 2.0))   // true</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>6. Components, minus the footguns</h3>
+<p>React's model with Java's types. Props are typed parameters and immutable. <code>state</code> is compiler-managed &mdash; no hooks, no rules-of-hooks, order-independent. Views are type-checked JSX.</p>
+<pre><code class="language-nova">component Counter(title: String) {
+  state count: Int = 0
+
+  view {
+    &lt;div&gt;
+      &lt;h1&gt;{title}&lt;/h1&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={count = count + 1}&gt;Increment&lt;/button&gt;
+    &lt;/div&gt;
+  }
+}</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>7. Modules, not classpath hell</h3>
+<p>Explicit file-based imports. <code>nova lock</code> pins every dependency by hash &mdash; reproducible builds, no resolution algorithm.</p>
+<pre><code class="language-nova">import math_helpers
+
+let r = math_helpers.clamp(150, 0, 100)   // 100</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>8. Concurrency the compiler understands</h3>
+<p>Single-threaded by default (no data races to fear). <code>spawn</code> opts into real parallelism for CPU work; <code>async</code> for IO. Blocking IO inside async code is a compile error &mdash; the language tells you what should be async.</p>
+<pre><code class="language-nova">async effect net fn fetchLen(url: String, net: Net) -> Int {
+  let body = fetch(url, net).await()   // parks the tasklet, never the thread
+  return len(body)
+}
+
+effect fn main() {
+  let t = spawn { heavyCompute() }     // Task[Int], runs on the worker pool
+  print(t.await())
+}</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>9. Streams are first-class</h3>
+<p>Kafka-style pub/sub in the standard library: topics, consumer groups, offsets. In-memory locally; swap the provider for real Kafka in production &mdash; same code.</p>
+<pre><code class="language-nova">stream events: String
+
+effect fn main() {
+  let sub = events.subscribe(group: "workers")
+  events.publish("hello")
+  events.publish(key: "k1", value: "world")
+
+  match sub.poll() {
+    Some(msg) => print(msg.value),
+    None      => print("caught up")
+  }
+}</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>10. AI as a language feature</h3>
+<p>An <code>ai fn</code>'s return type is its output schema. The provider must return structured data conforming to your types &mdash; no prompt-roulette parsing.</p>
+<pre><code class="language-nova">data class Summary(headline: String, score: Float)
+
+ai fn summarize(text: String) -&gt; Summary
+  model = "nova-mock-1"
+  temperature = 0.3
+{
+  prompt("Summarize in one sentence: " + text)
+}</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>11. Contracts you can read</h3>
+<p><code>requires</code> and <code>ensures</code> are syntax, not comments. Intent becomes checkable.</p>
+<pre><code class="language-nova">fn divide(a: Int, b: Int) -> Int
+  requires b != 0
+  ensures result * b <= a
+{
+  return a / b
+}</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>12. One manifest to deploy them all</h3>
+<p><code>app.nova</code> declares threading, resources, secrets, cron and targets. <code>nova deploy</code> reads it &mdash; the manifest is the ops doc.</p>
+<pre><code class="language-nova">app "my-service" {
+  version = "0.1.0"
+  entry = "main.nova"
+  threading = "auto"
+
+  resource stream "events" { partitions = 4 }
+  resource secret "db-password" { store = "env" }
+  resource cron "nightly" { schedule = "0 2 * * *", run = "report.nova" }
+
+  docker { base = "python:3.12-slim", port = 8080 }
+  deploy target = "docker"
+}</code></pre>
+</div>
+
+<div class="tour-step">
+<h3>13. Errors built for AI</h3>
+<p>Every diagnostic is structured JSON with a stable code and a fix hint &mdash; designed for AI consumers first, humans second.</p>
+<pre><code class="language-nova">$ nova check broken.nova
+[
+  {
+    "code": "E_NO_NULL",
+    "message": "Nova has no null; use Option[T] (Some/None)",
+    "line": 3, "col": 7,
+    "hint": "return None instead, and handle it with match"
+  }
+]</code></pre>
+</div>
+
+<div class="hero-ctas" style="margin-top:20px">
+  <a class="btn btn-primary" href="playground.html">Run Nova in your browser</a>
+  <a class="btn btn-ghost" href="docs/tutorial.html">Full 30-minute tutorial</a>
+</div>
+
+</section>
+</main>
+
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="js/main.js"></script>
+</body>
+</html>

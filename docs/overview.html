@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1>Nova</h1>
+<p><strong>An AI-native programming language — a hybrid of Java and React, authored by AI, for AI.</strong> Static typing with inference, classes + interfaces, components with type-checked views, no null, explicit effects, structured concurrency, first-class AI calls — and a platform layer (streams, manifest, deploy) around a small, coherent core.</p>
+<pre><code>component Counter(title: String) {
+  state count: Int = 0
+
+  view {
+    &lt;div&gt;
+      &lt;h1&gt;{title}&lt;/h1&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={count = count + 1}&gt;Increment&lt;/button&gt;
+    &lt;/div&gt;
+  }
+}
+
+effect fn main() {
+  render(Counter(title: &quot;Clicks&quot;))
+}
+
+main()</code></pre>
+<h2>5-minute quickstart</h2>
+<pre><code class="language-bash">./nova run examples/counter.nova     # component + state + re-render
+./nova run examples/concurrency.nova # spawn / async / await
+./nova run examples/streams.nova     # pub/sub streams
+./nova check examples/api.nova       # diagnostics are JSON, for AI consumers
+./nova fmt examples/hello.nova       # the ONE canonical style
+python3 tests/run_tests.py           # 17 checks — all green is the v1 bar</code></pre>
+<p>The manifest platform story:</p>
+<pre><code class="language-bash">cd examples/deploy-demo
+../../nova build                      # type-check + stage dist/ + Dockerfile
+../../nova deploy --target local      # run as a process (env=dev)
+../../nova deploy --target docker     # docker build (or prints the command)</code></pre>
+<h2>Design rationale</h2>
+<p><strong>Inherited from Java:</strong> static typing (with inference to kill verbosity), classes + interfaces + single inheritance, modules with explicit imports, encapsulation — and &quot;write once, run anywhere&quot; via the NovaVM bytecode vision (§18 of SPEC.md; v1 runs on the tree-walking interpreter).</p>
+<p><strong>Inherited from React:</strong> everything-is-a-component, declarative type-checked views with JSX-like syntax, unidirectional data flow, props immutable by default, local state as a first-class <code>state</code> declaration.</p>
+<p><strong>Java&#x27;s cons, fixed:</strong> no null (<code>Option[T]</code>, compiler-enforced) · no checked-exception ceremony (<code>Result[T,E]</code> + <code>?</code> + <code>match</code>) · no primitive/object duality · no boilerplate (inference, <code>data class</code>) · no classpath hell (explicit imports, hash-pinned by <code>nova lock</code>).</p>
+<p><strong>React&#x27;s cons, fixed:</strong> no hook-rules footguns (<code>state</code> is compiler-managed, order-independent) · no prop drilling by accident (typed context is v2, explicit) · no dynamic-typing footguns (everything is typed, views included) · no build-toolchain maze (one <code>nova</code> command).</p>
+<p><strong>AI-native principles:</strong> exactly one obvious way to write anything · no operator overloading · no implicit conversions · canonical auto-formatting built in · compiler diagnostics as structured JSON with stable error codes and suggested fixes · explicit effects (pure by default) · optional <code>requires</code>/<code>ensures</code> contracts · token-efficient but readable syntax.</p>
+<p><strong>Security as a pillar:</strong> no <code>eval</code> or dynamic code execution at all · IO/network/secrets only through explicit capabilities (no ambient authority) · checked integer arithmetic (overflow is an error, never wraparound) · hash-pinned modules (<code>nova.lock</code>) · async discipline enforced by the compiler (<code>E_ASYNC_BLOCKING</code>).</p>
+<h2>The A–Z story, layered</h2>
+<p>The <strong>language stays small</strong>; the A–Z lives in the platform around it:</p>
+<table><thead><tr><th>Layer</th><th>v1</th></tr></thead><tbody><tr><td>Language</td><td>types, effects, components, classes, modules, <code>spawn</code>/<code>async</code>/<code>await</code>, <code>stream</code> decls, <code>ai</code> blocks</td></tr><tr><td>Stdlib/runtime</td><td>in-memory stream provider (swappable), mock AI provider, capability-gated secrets</td></tr><tr><td>Toolchain</td><td><code>nova run/check/fmt/lock/migrate/build/deploy</code>, <code>app.nova</code> manifest, Dockerfile generation</td></tr><tr><td>Docs</td><td>SPEC, tutorial, FAQ, migration guide (Java→Nova, React→Nova), deployment guide</td></tr></tbody></table>
+<p>v2 (ROADMAP.md): NovaVM bytecode, real event loop, Kafka provider, cloud deploy targets, managed secret stores, typed context, LSP.</p>
+<h2>Repo layout</h2>
+<pre><code>nova_lang/        interpreter: lexer, parser, ast, checker, interpreter,
+                  formatter, providers (AI), streams, manifest, migrate, cli
+examples/         12 runnable programs, each with // EXPECT: blocks
+                  (+ deploy-demo/: app.nova manifest walkthrough)
+tests/            run_tests.py + errors/ (diagnostic-code assertions)
+docs/             tutorial.md, faq.md, migration-guide.md, deployment.md
+SPEC.md           the complete v1 language specification
+ROADMAP.md        what v2+ holds (and what v1 deliberately omits)</code></pre>
+<h2>Requirements</h2>
+<p>Python 3.8+, stdlib only — no pip installs, no dependencies. Correct over clever: a smaller language that fully works beats a sprawling one that half-works.</p>
+<h2>Status</h2>
+<p>v1 prototype: complete spec, working interpreter, 12 examples, 17 green tests. The <code>migrate</code> command and the HTTP AI provider are <strong>experimental</strong> scaffolds; the migration <em>guide</em> (mapping tables) is the real v1 deliverable there. See ROADMAP.md for what&#x27;s next.</p>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>

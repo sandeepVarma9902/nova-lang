@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migration Guide — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1>Nova Migration Guide (v1)</h1>
+<p>This is the v1 migration deliverable: two construct-mapping tables plus mechanical recipes with worked examples. The companion tool — <code>nova migrate --from java|jsx &lt;file&gt;</code> — is an <strong>experimental scaffold</strong> (see &quot;What the scaffold handles&quot; below); these tables are the source of truth.</p>
+<h2>Table A — Java → Nova</h2>
+<table><thead><tr><th>Java</th><th>Nova</th><th>Notes</th></tr></thead><tbody><tr><td><code>class Foo { ... }</code></td><td><code>class Foo { ... }</code></td><td>Same shape; <code>init</code> replaces constructors</td></tr><tr><td><code>interface I { ... }</code></td><td><code>interface I { ... }</code></td><td>Method signatures as <code>fn</code> declarations</td></tr><tr><td>POJO + getters/setters</td><td><code>data class Point(x: Float, y: Float)</code></td><td>Fields, init, <code>==</code>, readable print — one line</td></tr><tr><td><code>record</code></td><td><code>data class</code></td><td>Structural equality included</td></tr><tr><td><code>null</code> / <code>Optional&lt;T&gt;</code></td><td><code>Option[T]</code> (<code>Some</code>/<code>None</code>)</td><td>Compiler-enforced handling; no <code>.get()</code> roulette</td></tr><tr><td>checked exceptions (<code>throws</code>)</td><td><code>Result[T, E]</code> + <code>?</code></td><td>Failure in the signature, no ceremony</td></tr><tr><td><code>try</code>/<code>catch</code></td><td><code>match</code> on <code>Result</code></td><td>Exhaustive arms = your catch blocks</td></tr><tr><td><code>synchronized</code> / locks</td><td><code>spawn</code> + structured tasks</td><td>No user-space locks; default is single-threaded</td></tr><tr><td><code>static</code> field/method</td><td>module-level <code>let</code> / <code>fn</code></td><td>Modules replace the static-holder pattern</td></tr><tr><td><code>package</code> / classpath</td><td><code>import module_name</code></td><td>Explicit, file-based; no resolution algorithm</td></tr><tr><td>Streams API (<code>.map/.filter</code>)</td><td><code>List</code> methods + <code>for</code> loops</td><td>Plain iteration; v1 keeps it simple</td></tr><tr><td><code>CompletableFuture&lt;T&gt;</code></td><td><code>Task[T]</code> + <code>task.await()</code></td><td>Structured: joined before exit, failures surface</td></tr><tr><td><code>int/long</code></td><td><code>Int</code> (i64, checked)</td><td>Overflow is <code>R_INT_OVERFLOW</code>, never wraparound</td></tr><tr><td><code>double/float</code></td><td><code>Float</code></td><td>No implicit numeric conversions — ever</td></tr></tbody></table>
+<h2>Table B — React/JSX → Nova</h2>
+<table><thead><tr><th>React</th><th>Nova</th><th>Notes</th></tr></thead><tbody><tr><td><code>function C(props)</code></td><td><code>component C(title: String)</code></td><td>Props are typed parameters, immutable</td></tr><tr><td><code>useState(0)</code></td><td><code>state count: Int = 0</code></td><td>No hooks, no rules-of-hooks; order-independent</td></tr><tr><td>props</td><td>component params (immutable)</td><td>Assignment to a prop is <code>E_IMMUTABLE</code></td></tr><tr><td><code>useEffect</code></td><td>explicit <code>effect fn</code> + event handlers</td><td>No implicit render side-effects; lifecycle is v2</td></tr><tr><td><code>onClick={() =&gt; setX(x+1)}</code></td><td><code>onClick={count = count + 1}</code></td><td>Assignment is an expression — handlers are just expressions</td></tr><tr><td>conditional rendering (ternary/<code>&amp;&amp;</code>)</td><td><code>&lt;if cond&gt;...&lt;/if&gt;</code></td><td>Type-checked JSX-like block</td></tr><tr><td><code>items.map(...)</code></td><td><code>&lt;for item in items&gt;...&lt;/for&gt;</code></td><td>Repeats a template over a list</td></tr><tr><td>Context API</td><td>v2 typed context (ROADMAP.md)</td><td>v1: pass props explicitly</td></tr><tr><td><code>fetch().then(...)</code></td><td><code>effect net fn</code> + <code>?</code></td><td><code>net</code> capability as parameter; <code>Err</code> propagates</td></tr><tr><td><code>undefined</code> / optional chaining</td><td><code>Option</code> / <code>None</code> + <code>match</code></td><td>Exhaustiveness replaces <code>?.</code> guesswork</td></tr></tbody></table>
+<hr>
+<h2>Recipe 1 — Java POJO with getters/setters → data class</h2>
+<p><strong>Before (Java):</strong></p>
+<pre><code class="language-java">public class Point {
+  private double x;
+  private double y;
+  public Point(double x, double y) { this.x = x; this.y = y; }
+  public double getX() { return x; }
+  public double getY() { return y; }
+  // + equals + hashCode + toString (~40 lines total)
+}</code></pre>
+<p><strong>After (Nova):</strong></p>
+<pre><code class="language-nova">data class Point(x: Float, y: Float)
+
+let p = Point(x: 1.0, y: 2.0)
+print(p)                              // Point(x: 1.0, y: 2.0)
+print(p == Point(x: 1.0, y: 2.0))     // true</code></pre>
+<p><strong>Recipe:</strong> fields become constructor params; delete getters/setters/equals/hashCode/toString — the <code>data class</code> generates them. Mutable POJOs: declare <code>var</code> fields in a regular <code>class</code> with <code>init</code> instead.</p>
+<h2>Recipe 2 — try/catch → Result + match</h2>
+<p><strong>Before (Java):</strong></p>
+<pre><code class="language-java">String greetUser(int id) {
+  try {
+    String name = fetchUser(id);   // throws UserNotFoundException
+    return &quot;Hello, &quot; + name + &quot;!&quot;;
+  } catch (UserNotFoundException e) {
+    return &quot;Error: &quot; + e.getMessage();
+  }
+}</code></pre>
+<p><strong>After (Nova):</strong></p>
+<pre><code class="language-nova">effect fn fetchUser(id: Int) -&gt; Result[String, String] {
+  if id == 1 { return Ok(&quot;Ada&quot;) }
+  return Err(&quot;user &quot; + str(id) + &quot; not found&quot;)
+}
+
+effect fn greetUser(id: Int) -&gt; Result[String, String] {
+  let name = fetchUser(id)?        // Err returns early — no catch block
+  return Ok(&quot;Hello, &quot; + name + &quot;!&quot;)
+}
+
+match greetUser(7) {
+  Ok(msg) =&gt; print(msg),
+  Err(e) =&gt; print(&quot;Error: &quot; + e)
+}</code></pre>
+<p><strong>Recipe:</strong> (1) change the throwing method&#x27;s return to <code>Result[T, String]</code> (or a typed error); (2) replace <code>throw</code> with <code>return Err(...)</code>; (3) replace <code>try</code> with <code>?</code> on each fallible call inside a <code>Result</code>-returning function; (4) replace <code>catch</code> with <code>match</code> arms at the handling site. Each step is mechanical.</p>
+<h2>Recipe 3 — React counter → Nova component</h2>
+<p><strong>Before (React):</strong></p>
+<pre><code class="language-jsx">function Counter({ title }) {
+  const [count, setCount] = useState(0);
+  return (
+    &lt;div&gt;
+      &lt;h1&gt;{title}&lt;/h1&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={() =&gt; setCount(c =&gt; c + 1)}&gt;Increment&lt;/button&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+<p><strong>After (Nova):</strong></p>
+<pre><code class="language-nova">component Counter(title: String) {
+  state count: Int = 0
+
+  view {
+    &lt;div&gt;
+      &lt;h1&gt;{title}&lt;/h1&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={count = count + 1}&gt;Increment&lt;/button&gt;
+    &lt;/div&gt;
+  }
+}</code></pre>
+<p><strong>Recipe:</strong> (1) props destructure → typed component params; (2) each <code>useState</code> → a <code>state</code> declaration (annotation required); (3) <code>setX(...)</code> → assignment <code>x = ...</code>; (4) ternaries/<code>&amp;&amp;</code> → <code>&lt;if&gt;</code>, <code>.map</code> → <code>&lt;for&gt;</code>. Note: hooks with cleanup (<code>useEffect</code> return) have no v1 equivalent — flag for manual rewrite.</p>
+<h2>Recipe 4 — null-check chain → Option + match</h2>
+<p><strong>Before (JS):</strong></p>
+<pre><code class="language-js">const city = user?.address?.city ?? &quot;unknown&quot;;</code></pre>
+<p><strong>After (Nova):</strong> model each nullable level as <code>Option</code> and handle explicitly:</p>
+<pre><code class="language-nova">data class Address(city: String)
+data class User(name: String, address: Option[Address])
+
+fn cityOf(u: User) -&gt; String {
+  return match u.address {
+    Some(a) =&gt; a.city,
+    None =&gt; &quot;unknown&quot;
+  }
+}</code></pre>
+<p><strong>Recipe:</strong> (1) every <code>T | null | undefined</code> becomes <code>Option[T]</code>; (2) every <code>?.</code> becomes a <code>match</code> arm or <code>?</code> (inside an <code>Option</code>-returning function); (3) every <code>?? default</code> becomes the <code>None</code> arm. The compiler&#x27;s exhaustiveness check (<code>E_NON_EXHAUSTIVE</code>) is your test for missed branches.</p>
+<hr>
+<h2>What the scaffold handles vs. what needs hands</h2>
+<p><code>nova migrate --from java|jsx &lt;file&gt;</code> is an <strong>experimental starting scaffold, not a transpiler</strong>. Honest accounting:</p>
+<p><strong>Handled mechanically:</strong></p>
+<ul>
+<li>Getter/setter pairs → <code>data class</code> fields (Recipe 1 pattern)</li>
+<li><code>null</code> returns / <code>Optional&lt;T&gt;</code> → <code>Option[T]</code>; <code>?.</code> / <code>??</code> → <code>match</code> skeleton (Recipe 4)</li>
+<li><code>try/catch</code> → <code>Result</code> + <code>?</code> + <code>match</code> skeleton (Recipe 2)</li>
+<li>Java primitive/wrapper types → <code>Int</code>/<code>Float</code>/<code>String</code>/<code>Bool</code>/<code>Unit</code>; <code>List&lt;X&gt;</code> → <code>List[X]</code></li>
+<li><code>useState</code> → <code>state</code> declarations; <code>setX</code> calls → assignments; simple JSX → view blocks (Recipe 3)</li>
+</ul>
+<p><strong>Emitted as WARNINGs (human review required):</strong></p>
+<ul>
+<li>Everything it can&#x27;t convert: reflection, annotations, generics beyond <code>List</code>, inheritance hierarchies needing <code>extends</code>/<code>super</code> decisions, <code>useEffect</code> cleanup, Context providers, <code>synchronized</code> blocks, static initializers, checked-exception hierarchies (it flattens to <code>Result[T, String]</code> — you pick the error type)</li>
+<li>Effect placement: the scaffold can&#x27;t know which functions need <code>effect</code>/<code>effect io</code>/<code>effect net</code> — expect <code>E_EFFECT</code> errors on first <code>nova check</code> and annotate deliberately</li>
+<li>Capability threading: every <code>effect io</code>/<code>net</code> function needs its <code>IO</code>/<code>Net</code> parameter wired from the entry module — a design decision, not a mechanical one</li>
+</ul>
+<p><strong>Workflow:</strong> run the scaffold → <code>nova fmt</code> → <code>nova check</code> → fix each diagnostic (they&#x27;re JSON with hints — built for this) → <code>nova lock</code> when imports are stable. A full transpiler is v2; v1&#x27;s deliverable is these tables plus a scaffold that never silently guesses.</p>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>

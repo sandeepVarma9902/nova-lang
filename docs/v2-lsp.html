@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Language Server — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1>Nova LSP — <code>nova lsp</code></h1>
+<p>&gt; <strong>EXPERIMENTAL.</strong> This is a skeleton server (v2 roadmap item). It speaks &gt; real LSP over stdio and its diagnostics are real, but hover is heuristic &gt; and the feature set is intentionally small. Do not depend on it yet.</p>
+<h2>What it is</h2>
+<p><code>nova_lang/lsp.py</code> is a Language Server Protocol server for Nova, written in stdlib-only Python. It reads JSON-RPC messages from stdin (with <code>Content-Length</code> framing) and writes responses/notifications to stdout.</p>
+<h2>Running it</h2>
+<pre><code class="language-bash">cd ~/workspace/nova-lang
+python3 -m nova_lang.lsp</code></pre>
+<p>Once the CLI wiring lands, the intended entry point is:</p>
+<pre><code class="language-bash">nova lsp</code></pre>
+<p>The server logs to <strong>stderr</strong> only — stdout is the protocol wire. Any stdout pollution breaks the framing.</p>
+<h2>Pointing an editor at it</h2>
+<p>Any editor with a generic stdio LSP client can drive it. The recipe is the same everywhere: <strong>command</strong> = the interpreter + module, <strong>transport</strong> = stdio, <strong>file type</strong> = <code>nova</code> (files ending in <code>.nova</code>).</p>
+<p><strong>Neovim</strong> (nvim-lspconfig style):</p>
+<pre><code class="language-lua">local lspconfig = require(&#x27;lspconfig&#x27;)
+local configs = require(&#x27;lspconfig.configs&#x27;)
+configs.nova = {
+  default_config = {
+    cmd = { &#x27;python3&#x27;, &#x27;-m&#x27;, &#x27;nova_lang.lsp&#x27; },
+    filetypes = { &#x27;nova&#x27; },
+    root_dir = lspconfig.util.root_pattern(&#x27;.nova-manifest&#x27;, &#x27;.git&#x27;),
+  },
+}</code></pre>
+<p><strong>Emacs</strong> (eglot):</p>
+<pre><code class="language-elisp">(add-to-list &#x27;eglot-server-programs
+             &#x27;(nova-mode . (&quot;python3&quot; &quot;-m&quot; &quot;nova_lang.lsp&quot;)))</code></pre>
+<p><strong>VS Code</strong>: use a generic LSP client extension (e.g. &quot;Generic LSP Client&quot; or the <code>vscode-languageclient</code> sample host) pointed at <code>python3 -m nova_lang.lsp</code> with <code>nova</code> as the language id.</p>
+<p><strong>Helix</strong> (<code>languages.toml</code>):</p>
+<pre><code class="language-toml">[[language]]
+name = &quot;nova&quot;
+scope = &quot;source.nova&quot;
+file-types = [&quot;nova&quot;]
+language-servers = [&quot;nova-lsp&quot;]
+
+[language-server.nova-lsp]
+command = &quot;python3&quot;
+args = [&quot;-m&quot;, &quot;nova_lang.lsp&quot;]</code></pre>
+<p><strong>Sublime Text</strong> (LSP package): add a client config with <code>&quot;command&quot;: [&quot;python3&quot;, &quot;-m&quot;, &quot;nova_lang.lsp&quot;]</code> and selector <code>source.nova</code>.</p>
+<h2>What&#x27;s implemented</h2>
+<table><thead><tr><th>Method</th><th>Kind</th><th>Behavior</th></tr></thead><tbody><tr><td><code>initialize</code></td><td>request</td><td>Returns capabilities: full text-document sync (<code>openClose</code> + <code>change: full</code>), <code>hoverProvider</code>. Plus <code>serverInfo</code> (<code>nova-lsp</code>, version).</td></tr><tr><td><code>initialized</code></td><td>notification</td><td>No-op.</td></tr><tr><td><code>textDocument/didOpen</code></td><td>notification</td><td>Stores the document, runs the checker, pushes diagnostics.</td></tr><tr><td><code>textDocument/didChange</code></td><td>notification</td><td>Full-sync replace; re-checks and pushes fresh diagnostics.</td></tr><tr><td><code>textDocument/didClose</code></td><td>notification</td><td>Drops the document from memory.</td></tr><tr><td><code>textDocument/hover</code></td><td>request</td><td>Heuristic symbol lookup (see below).</td></tr><tr><td><code>shutdown</code></td><td>request</td><td>Returns <code>null</code>; next <code>exit</code> leaves with code 0.</td></tr><tr><td><code>exit</code></td><td>notification</td><td>Exits 0 after <code>shutdown</code>, 1 otherwise.</td></tr></tbody></table>
+<p>Unknown methods get a standard <code>-32601 Method not found</code> error.</p>
+<h2>What&#x27;s REAL vs heuristic</h2>
+<p><strong>Real — diagnostics.</strong> <code>textDocument/publishDiagnostics</code> carries Nova&#x27;s own checker output: <code>check_source()</code> runs on every open/change, and each <code>Diagnostic</code> is mapped to an LSP Diagnostic with:</p>
+<ul>
+<li><code>range</code> — 1-based <code>line</code>/<code>col</code> converted to 0-based, end extended over</li>
+</ul>
+<p>  the identifier at that spot</p>
+<ul>
+<li><code>severity</code> — <code>1</code> (Error); the checker currently emits errors only</li>
+<li><code>code</code> — the stable Nova code, e.g. <code>E_NOT_SEND</code>, <code>E_TYPE_MISMATCH</code>,</li>
+</ul>
+<p>  <code>E_SYNTAX</code> — the same codes <code>nova check</code> prints as JSON</p>
+<ul>
+<li><code>source</code> — <code>&quot;nova&quot;</code>, plus the checker&#x27;s <code>hint</code> appended to the message</li>
+</ul>
+<p><strong>Heuristic — hover.</strong> Hover does <em>not</em> use the checker&#x27;s scopes. It builds a per-request declaration index by regex-scanning the open document (<code>fn</code> with effect keyword + return type, <code>let</code>/<code>var</code> with annotation or a literal-type guess, <code>state</code>, <code>class</code>, <code>interface</code>, <code>component</code>, and function parameters) and returns the declaration under the cursor as Markdown. Every hover response says so explicitly:</p>
+<p>````markdown</p>
+<pre><code class="language-nova">fn greet(name: String) -&gt; String</code></pre>
+<p>function · declared on line 3 · effect: <code>pure</code> _Heuristic hover — declaration scan, not type-checked._</p>
+<p>````</p>
+<p>It is good for &quot;what&#x27;s this variable / what&#x27;s this function&#x27;s signature&quot;. It is not semantic: it won&#x27;t resolve imports, shadowing, method calls, or anything the regexes don&#x27;t see.</p>
+<h2>Known limitations (experimental)</h2>
+<ul>
+<li>Full-document sync only; incremental <code>contentChanges</code> are not supported.</li>
+<li>No pull diagnostics (<code>textDocument/diagnostic</code>), no completion, no</li>
+</ul>
+<p>  go-to-definition, no formatting — the roadmap, not this skeleton.</p>
+<ul>
+<li>One document = one <code>check_source(..., is_entry=True)</code> run; module</li>
+</ul>
+<p>  imports resolve against the file&#x27;s real directory, unsaved-buffer-only   files check as <code>untitled.nova</code> against the working directory.</p>
+<ul>
+<li>A checker crash is caught and surfaced as an <code>E_LSP_INTERNAL</code> diagnostic</li>
+</ul>
+<p>  rather than killing the server.</p>
+<h2>Tests</h2>
+<pre><code class="language-bash">python3 tests/test_lsp.py</code></pre>
+<p>Spawns the server as a subprocess and speaks real LSP: initialize (capability assertions), didOpen a file containing an <code>E_NOT_SEND</code> error (asserts the code, severity, and range come back), hover over a variable (asserts the heuristic returns its inferred type), didChange to a clean file (asserts diagnostics clear), an unknown method (asserts <code>-32601</code>), then <code>shutdown</code>/<code>exit</code> (asserts exit code 0). The existing suite (<code>python3 tests/run_tests.py</code>) is unaffected and stays green.</p>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>

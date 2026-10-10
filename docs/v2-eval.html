@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nova eval Harness — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1><code>nova eval</code> — eval-driven LLM iteration</h1>
+<p><code>nova eval</code> runs a suite of prompts through Nova <code>ai fn</code>s, checks each completion against a declared predicate, and reports pass/fail + latency as JSON. It is the honest v1 of &quot;training things&quot;:</p>
+<p>&gt; <strong>This is eval-driven iteration, not training.</strong> Nothing here trains, &gt; fine-tunes, or modifies any model. It measures prompt/model/config &gt; changes so you can iterate: tweak the prompt, re-run the suite, diff the &gt; report. Any improvement comes from your iteration loop, not from this &gt; harness doing anything to the model.</p>
+<h2>Running it</h2>
+<pre><code class="language-sh">nova eval path/to/suite.json</code></pre>
+<ul>
+<li>Prints the JSON report to <strong>stdout</strong> (pure JSON — safe to pipe into</li>
+</ul>
+<p>  <code>jq</code> or save).</p>
+<ul>
+<li>Prints a one-line human summary to <strong>stderr</strong>, e.g.</li>
+</ul>
+<p>  <code>eval: smoke — 4/5 passed (provider=mock); failed: will-fail</code>.</p>
+<ul>
+<li>Exit code: <code>0</code> = all evals passed, <code>1</code> = at least one failed,</li>
+</ul>
+<p>  <code>2</code> = the suite itself could not run (missing file, bad JSON, …).</p>
+<p>Provider selection follows the existing rule in <code>nova_lang/providers.py</code>: the mock provider by default, <code>NOVA_AI_PROVIDER=http</code> (or an explicit override) for the experimental HTTP provider. The mock provider is deterministic, so mock runs are reproducible.</p>
+<h2>Suite format</h2>
+<p>A suite is a JSON object:</p>
+<pre><code class="language-json">{
+  &quot;suite&quot;: &quot;summarizer-smoke&quot;,
+  &quot;description&quot;: &quot;optional free text&quot;,
+  &quot;model&quot;: &quot;nova-eval&quot;,
+  &quot;temperature&quot;: 0.7,
+  &quot;max_tokens&quot;: 512,
+  &quot;evals&quot;: [
+    {
+      &quot;name&quot;: &quot;mentions-topic&quot;,
+      &quot;prompt&quot;: &quot;Summarize in one sentence: Nova is a programming language.&quot;,
+      &quot;predicate&quot;: { &quot;contains&quot;: &quot;Nova&quot; }
+    },
+    {
+      &quot;name&quot;: &quot;valid-json&quot;,
+      &quot;prompt&quot;: &quot;Reply with JSON only: {\&quot;answer\&quot;: 42}.&quot;,
+      &quot;model&quot;: &quot;other-model&quot;,
+      &quot;temperature&quot;: 0.0,
+      &quot;predicate&quot;: { &quot;json_has_key&quot;: &quot;answer&quot; }
+    }
+  ]
+}</code></pre>
+<ul>
+<li><code>suite</code> (string): report label.</li>
+<li><code>model</code> / <code>temperature</code> / <code>max_tokens</code> (optional, suite- or per-eval):</li>
+</ul>
+<p>  defaults for the generated <code>ai fn</code> config. Per-eval values override   suite-level ones.</p>
+<ul>
+<li><code>evals</code>: non-empty list. Each eval needs a unique <code>name</code>, a string</li>
+</ul>
+<p>  <code>prompt</code>, and a <code>predicate</code>.</p>
+<ul>
+<li>The prompt is embedded in a generated Nova <code>ai fn</code> and goes through the</li>
+</ul>
+<p>  real pipeline — lex, parse, type-check, interpreter executes the body and   collects <code>prompt(...)</code> parts, then the selected provider completes it.   Quotes, newlines and tabs in prompts are escaped safely.</p>
+<h2>Predicates</h2>
+<p>A predicate is a single-key object <code>{ &quot;&lt;kind&gt;&quot;: &lt;argument&gt; }</code>. The completion text (the <code>ai fn</code>&#x27;s <code>String</code> output) is checked against it:</p>
+<table><thead><tr><th>Kind</th><th>Argument</th><th>Passes when…</th></tr></thead><tbody><tr><td><code>contains</code></td><td>substring</td><td>output contains it</td></tr><tr><td><code>not_contains</code></td><td>substring</td><td>output does not contain it</td></tr><tr><td><code>regex</code></td><td>pattern</td><td><code>re.search(pattern, output)</code> matches</td></tr><tr><td><code>equals</code></td><td>exact text</td><td>output equals it exactly</td></tr><tr><td><code>json_valid</code></td><td><code>true</code></td><td>output parses as JSON (bare <code>&quot;json_valid&quot;</code> also works)</td></tr><tr><td><code>json_has_key</code></td><td>key path</td><td>output parses as a JSON object containing the key; dotted paths (<code>&quot;a.b&quot;</code>) descend into nested objects</td></tr></tbody></table>
+<p>Bad predicates (unknown kind, invalid regex, non-string argument) are rejected when the suite loads — before anything runs. An eval whose <code>ai fn</code> errors (bad prompt rendering, provider failure) is recorded as failed with an <code>error</code> field; it never aborts the rest of the suite.</p>
+<h2>The report</h2>
+<pre><code class="language-json">{
+  &quot;suite&quot;: &quot;summarizer-smoke&quot;,
+  &quot;provider&quot;: &quot;mock&quot;,
+  &quot;total&quot;: 2,
+  &quot;passed&quot;: 1,
+  &quot;failed&quot;: 1,
+  &quot;evals&quot;: [
+    {
+      &quot;name&quot;: &quot;mentions-topic&quot;,
+      &quot;pass&quot;: true,
+      &quot;latency_ms&quot;: 0.42,
+      &quot;output_excerpt&quot;: &quot;[mock] Summarize in one sentence: Nova is a ...&quot;,
+      &quot;predicate&quot;: { &quot;contains&quot;: &quot;Nova&quot; },
+      &quot;detail&quot;: &quot;output contains &#x27;Nova&#x27;&quot;,
+      &quot;error&quot;: null
+    }
+  ]
+}</code></pre>
+<p><code>output_excerpt</code> is the first 200 characters of the completion (enough to debug a failure without bloating the report); <code>detail</code> is a human-readable why-it-passed/failed; <code>error</code> is non-null only when the eval errored before the predicate ran.</p>
+<h2>The iteration loop</h2>
+<p>This is what the harness is for:</p>
+<p>1. Write a suite that captures what &quot;good&quot; looks like for your prompt —    start with <code>contains</code> / <code>not_contains</code> / <code>regex</code> checks against the mock    provider so the loop is fast and free. 2. Run it: <code>nova eval suite.json &gt; report-1.json</code>. 3. Tweak the prompt (or model, temperature) in the suite. 4. Re-run: <code>nova eval suite.json &gt; report-2.json</code>, then diff the two    reports. The <code>detail</code> and <code>output_excerpt</code> fields tell you exactly what    moved. 5. Promote the winning prompt into your real <code>.nova</code> source.</p>
+<p>Tips:</p>
+<ul>
+<li>Keep evals small and focused — one behavior per eval, so a failure names</li>
+</ul>
+<p>  the regression.</p>
+<ul>
+<li>Use the mock provider while iterating on prompt wording; switch to the</li>
+</ul>
+<p>  real provider (<code>NOVA_AI_PROVIDER=http</code>) for a final validation pass.   Mock runs cost nothing and are deterministic; real runs cost money and   are not.</p>
+<ul>
+<li>Track <code>latency_ms</code> across runs if responsiveness matters to you — the</li>
+</ul>
+<p>  mock reports interpreter overhead only; real providers report true   round-trip time.</p>
+<h2>What this is not</h2>
+<ul>
+<li>Not training or fine-tuning — no weights change, no gradients, no data</li>
+</ul>
+<p>  collection. The word &quot;training&quot; in the roadmap means &quot;training <em>things</em>&quot;:   tooling around models, starting here.</p>
+<ul>
+<li>Not a benchmark of Nova itself — it grades prompt/provider behavior,</li>
+</ul>
+<p>  not the language.</p>
+<ul>
+<li>Not a judge of quality beyond what your predicates assert — a passing</li>
+</ul>
+<p>  suite means &quot;the outputs matched my checks&quot;, nothing more. Write   predicates that actually capture what you care about.</p>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>

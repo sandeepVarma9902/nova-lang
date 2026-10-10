@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deployment — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1>Deployment — app.nova manifest reference + worked example</h1>
+<h2>Manifest schema reference</h2>
+<p><code>app.nova</code> is optional but built-in: place it next to your entry file and the toolchain auto-discovers it. Every key:</p>
+<table><thead><tr><th>Key</th><th>Type</th><th>Default</th><th>Validation</th></tr></thead><tbody><tr><td><code>app &quot;&lt;name&gt;&quot;</code></td><td>String</td><td><em>required</em></td><td>Non-empty; names the application (used in <code>dist/</code> and image tags)</td></tr><tr><td><code>version</code></td><td>String</td><td><code>&quot;0.1.0&quot;</code></td><td>Semver-shaped <code>X.Y.Z</code> recommended</td></tr><tr><td><code>entry</code></td><td>String</td><td><code>&quot;main.nova&quot;</code></td><td>Must be a readable <code>.nova</code> file; type-checked by <code>nova build</code></td></tr><tr><td><code>threading</code></td><td>`&quot;single&quot; \</td><td>&quot;multi&quot; \</td><td>&quot;auto&quot;`</td><td><code>&quot;auto&quot;</code></td><td>Unknown values rejected; overridable via <code>NOVA_THREADING</code> env</td></tr><tr><td><code>env &lt;name&gt; { ... }</code></td><td>String→String map</td><td>—</td><td>Non-secret config; applied as env vars on <code>nova deploy</code>; selected with <code>--env NAME</code></td></tr><tr><td><code>resource stream &quot;&lt;topic&gt;&quot;</code></td><td><code>{ partitions: Int }</code></td><td><code>partitions = 1</code></td><td>Declares a typed topic the app uses; must match a <code>stream</code> declaration</td></tr><tr><td><code>resource secret &quot;&lt;name&gt;&quot;</code></td><td><code>{ store: &quot;env&quot; }</code></td><td><code>store = &quot;env&quot;</code></td><td>v1 only supports <code>store = &quot;env&quot;</code> → resolves <code>NOVA_SECRET_&lt;NAME&gt;</code> at runtime (uppercased, <code>-</code>→<code>_</code>)</td></tr><tr><td><code>resource cron &quot;&lt;name&gt;&quot;</code></td><td><code>{ schedule, run }</code></td><td>—</td><td><strong>Declared only in v1</strong> — the scheduler itself is v2; <code>schedule</code> is cron syntax, <code>run</code> is the <code>.nova</code> file</td></tr><tr><td><code>docker { base, port }</code></td><td>String, Int</td><td><code>base = &quot;python:3.12-slim&quot;</code>, <code>port = 8080</code></td><td><code>port</code> must be 1–65535; <code>base</code> is the image tag</td></tr><tr><td><code>deploy target</code></td><td>`&quot;local&quot; \</td><td>&quot;docker&quot;`</td><td><code>&quot;local&quot;</code></td><td>Cloud targets are v2</td></tr></tbody></table>
+<p>Validation failures surface as structured diagnostics before anything runs — <code>nova build</code> never produces a half-built <code>dist/</code>.</p>
+<h2>Worked example: deploy-demo</h2>
+<p>The demo lives at <code>examples/deploy-demo/</code>. Read the two source files first:</p>
+<p><strong>app.nova</strong></p>
+<pre><code class="language-nova">app &quot;deploy-demo&quot; {
+  version = &quot;0.1.0&quot;
+  entry = &quot;main.nova&quot;
+  threading = &quot;single&quot;   // deterministic: spawn runs inline
+
+  env dev { log_level = &quot;debug&quot; }
+  env prod { log_level = &quot;info&quot; }
+
+  resource stream &quot;events&quot; { partitions = 4 }
+  resource secret &quot;db-password&quot; { store = &quot;env&quot; }
+  resource cron &quot;nightly-report&quot; { schedule = &quot;0 2 * * *&quot;, run = &quot;report.nova&quot; }
+
+  docker { base = &quot;python:3.12-slim&quot;, port = 8080 }
+
+  deploy target = &quot;local&quot;
+}</code></pre>
+<p><strong>main.nova</strong></p>
+<pre><code class="language-nova">stream events: String
+
+effect io fn readPassword(io: IO) -&gt; String {
+  return match secret(&quot;db-password&quot;, io) {
+    Ok(pw) =&gt; &quot;secret loaded&quot;,
+    Err(e) =&gt; &quot;no secret: &quot; + e
+  }
+}
+
+effect io fn main(io: IO) {
+  print(readPassword(io))
+  let sub = events.subscribe(group: &quot;demo&quot;)
+  let t = spawn { &quot;processed&quot; }
+  events.publish(&quot;hello from &quot; + t.await())
+  match sub.poll() {
+    None =&gt; print(&quot;(empty)&quot;),
+    Some(m) =&gt; print(m.value)
+  }
+}
+
+main(io)</code></pre>
+<p>Notice the capability story: <code>io</code> arrives as a parameter at the entry (<code>main(io)</code>), and <code>secret(&quot;db-password&quot;, io)</code> resolves through the capability-gated store — the name is in the manifest, the value is never in source.</p>
+<h3>Step 1 — <code>nova build</code></h3>
+<pre><code class="language-bash">cd examples/deploy-demo
+nova build</code></pre>
+<p>Build validates the manifest, type-checks <code>main.nova</code>, and stages <code>dist/</code>:</p>
+<pre><code>dist/
+  main.nova      # entry + transitive imports, flattened
+  Dockerfile     # generated from the docker {} block</code></pre>
+<h3>Step 2 — the generated Dockerfile, walked through</h3>
+<pre><code class="language-dockerfile">FROM python:3.12-slim          # from docker.base
+WORKDIR /app
+COPY nova_lang /opt/nova-lang/nova_lang   # the interpreter (stdlib-only, no pip)
+COPY nova /opt/nova-lang/nova
+ENV PATH=&quot;/opt/nova-lang:${PATH}&quot;
+COPY main.nova /app/           # staged app sources
+ENV NOVA_THREADING=single      # threading model baked in from app.nova
+EXPOSE 8080                    # from docker.port
+CMD [&quot;nova&quot;, &quot;run&quot;, &quot;main.nova&quot;]</code></pre>
+<p>Nothing but the interpreter and your sources — no dependency install step because there are no dependencies.</p>
+<h3>Step 3 — <code>nova deploy --target local</code></h3>
+<pre><code class="language-bash">nova deploy --target local --env prod</code></pre>
+<p>This runs the entry as a process with the <code>env prod</code> section applied (<code>log_level=info</code> becomes an env var). Secrets resolve <strong>at runtime</strong> from the store:</p>
+<pre><code class="language-bash">NOVA_SECRET_DB_PASSWORD=s3cr3t nova deploy --target local
+# =&gt; secret loaded
+# =&gt; hello from processed</code></pre>
+<p>Without the env var you get the honest fallback: <code>no secret: secret not found: db-password</code> — the <code>match</code> on <code>secret(...)</code> makes the missing-secret path explicit, not a crash.</p>
+<h3>Step 4 — <code>nova deploy --target docker</code></h3>
+<pre><code class="language-bash">nova deploy --target docker</code></pre>
+<p>This <code>docker build</code>s the staged image (or prints the exact <code>docker build</code> command if docker is absent, so CI can run it). Tag and port derive from <code>app</code> name, <code>version</code>, and <code>docker.port</code>.</p>
+<h2>What v2 adds</h2>
+<ul>
+<li><strong>Cloud targets</strong> (<code>deploy target = &quot;aws&quot; | &quot;gcp&quot;</code>): the same manifest, managed runtimes</li>
+<li><strong>Managed secret stores</strong>: <code>resource secret ... { store = &quot;aws&quot; }</code> / <code>&quot;gcp&quot;</code> instead of env vars</li>
+<li><strong>Cron scheduler</strong>: <code>resource cron</code> stops being declarative-only — the platform actually runs <code>report.nova</code> on the schedule</li>
+<li><strong>Kafka provider</strong> for streams (<code>NOVA_STREAMS=kafka</code>): same <code>publish</code>/<code>poll</code>/<code>commit</code> code, real broker</li>
+<li><strong>NovaVM</strong>: the interpreter is replaced by bytecode execution inside the same images — smaller, faster, same semantics (SPEC §18)</li>
+</ul>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>

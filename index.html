@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nova — Java's discipline × React's soul, written for AI</title>
+<meta name="description" content="Nova is an AI-native programming language: Java's static discipline fused with React's component model. No null. No hook rules. Compiles to portable bytecode, deploys to Docker, AWS and GCP.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="index.html" class="active">Home</a>
+      <a href="tour.html">Tour</a>
+      <a href="snippets.html">Snippets</a>
+      <a href="playground.html">Playground</a>
+      <a href="docs.html">Docs</a>
+      <a href="download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+
+<main>
+<section class="hero">
+  <span class="hero-badge">v2 &mdash; bytecode VM, browser renderer, cloud deploy</span>
+  <h1><span class="nova-star">&#10022;</span> Nova</h1>
+  <p class="thesis">Java's discipline <span class="x">&times;</span> React's soul &mdash; a programming language written for AI.</p>
+  <p class="sub">Statically typed like Java, component-driven like React, secure by default, and deployable from the same toolchain. One language from UI to Kafka to the cloud &mdash; with the compiler doing the thinking about async, nulls, and errors so you don't have to.</p>
+  <div class="hero-ctas">
+    <a class="btn btn-primary" href="tour.html">Take the tour</a>
+    <a class="btn btn-ghost" href="playground.html">Try it in your browser</a>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="n">31/31</div><div class="l">tests green</div></div>
+    <div class="stat"><div class="n">0</div><div class="l">nulls allowed</div></div>
+    <div class="stat"><div class="n">1</div><div class="l">command: build, deploy, run</div></div>
+    <div class="stat"><div class="n">100%</div><div class="l">stdlib-only toolchain</div></div>
+  </div>
+</section>
+
+<section class="section" id="why-nova">
+  <h2>Why Nova</h2>
+  <p class="lede">Java and React come from two different worlds &mdash; and each one got something deeply right. Java gave us <strong>safety</strong>: static types, real modules, write-once-run-anywhere. React gave us <strong>composition</strong>: components, declarative UI, state you can actually reason about. But Java drowned its strengths in boilerplate and null pointers, and React left you guessing about types, hook rules, and async.</p>
+  <p class="lede"><strong>Nova refuses the trade-off.</strong> It takes every strength from both &mdash; Java's discipline, React's soul &mdash; fixes everything that became a con, and fuses them into a single programming language. Your UI, your API, your streams, your deployment: one language, frontend to backend, designed from day one for AI to write and humans to trust.</p>
+  <div class="grid grid-2">
+    <div class="card">
+      <h3>Java, minus the pain</h3>
+      <p>Static typing with inference. Classes, interfaces, explicit modules. Portable bytecode. No null. No checked-exception ceremony. No 40-line POJO. No classpath hell. Everything Java promised about safety &mdash; delivered.</p>
+    </div>
+    <div class="card">
+      <h3>React, minus the footguns</h3>
+      <p>Everything is a component. Type-checked declarative views. Immutable props, unidirectional data flow. Compiler-managed state &mdash; no rules of hooks. No prop drilling. No <code>undefined is not a function</code>. Everything React promised about UI &mdash; delivered.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="code-wrap">
+<pre><code class="language-nova">// A Nova component: Java's types holding React's model.
+component Counter(title: String) {
+  state count: Int = 0          // no hooks, no rules-of-hooks. The compiler owns this.
+
+  view {
+    &lt;div&gt;
+      &lt;h1&gt;{title}&lt;/h1&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={count = count + 1}&gt;Increment&lt;/button&gt;
+    &lt;/div&gt;
+  }
+}
+
+effect fn main() {
+  let app = render(Counter(title: "Clicks"))
+  app.fire("onClick")           // state 0 -&gt; 1, re-renders. That's the whole framework.
+}
+main()</code></pre>
+  </div>
+</section>
+
+<section class="section">
+  <h2>Inherit the best. Fix the rest.</h2>
+  <p class="lede">Nova takes what Java and React got right, surgically removes what they got wrong, and adds what neither ever had: a language designed for AI to write.</p>
+  <div class="grid grid-3">
+    <div class="card">
+      <h3>From Java <span class="pill pill-java">inherited</span></h3>
+      <p>Static typing with inference, classes and interfaces, explicit modules, and write-once-run-anywhere via NovaVM bytecode. The discipline &mdash; without the 40-line POJO.</p>
+    </div>
+    <div class="card">
+      <h3>From React <span class="pill pill-react">inherited</span></h3>
+      <p>Everything is a component. Type-checked declarative views, immutable props, unidirectional data flow. The model &mdash; without the framework.</p>
+    </div>
+    <div class="card">
+      <h3>For AI <span class="pill pill-ai">native</span></h3>
+      <p>One obvious way to write anything. No implicit conversions, no operator overloading. Compiler errors as structured JSON with fix hints &mdash; built for AI consumers, not just humans.</p>
+    </div>
+    <div class="card">
+      <h3>Null is gone <span class="pill pill-fix">fixed</span></h3>
+      <p><code>Option[T]</code> with compiler-enforced handling. The billion-dollar mistake is a compile error now, not a 3&nbsp;a.m. page.</p>
+    </div>
+    <div class="card">
+      <h3>Errors without ceremony <span class="pill pill-fix">fixed</span></h3>
+      <p><code>Result[T, E]</code> plus the <code>?</code> operator. Failure lives in the signature &mdash; no checked-exception tax, no silent <code>undefined</code>.</p>
+    </div>
+    <div class="card">
+      <h3>Async, enforced <span class="pill pill-fix">fixed</span></h3>
+      <p>The compiler tells you what should be async (<code>E_ASYNC_BLOCKING</code>). Single-threaded by default, structured task pools when you opt in. You stop guessing.</p>
+    </div>
+    <div class="card">
+      <h3>Secure by construction <span class="pill pill-plat">platform</span></h3>
+      <p>No <code>eval</code> primitive exists. IO only through explicit capabilities. Checked integer arithmetic. Dependencies pinned by hash.</p>
+    </div>
+    <div class="card">
+      <h3>Streams built in <span class="pill pill-plat">platform</span></h3>
+      <p>First-class pub/sub with Kafka-style topics, consumer groups and offsets. In-memory locally, real Kafka provider when you deploy.</p>
+    </div>
+    <div class="card">
+      <h3>Deploy from the language <span class="pill pill-plat">platform</span></h3>
+      <p><code>app.nova</code> declares threading, secrets, cron and targets. <code>nova deploy --target docker|aws|gcp</code> &mdash; the manifest is the ops doc.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <h2>AI is a first-class citizen</h2>
+  <p class="lede">An <code>ai fn</code>'s return <em>type</em> is its output schema. Structured output for free &mdash; the provider must return data conforming to your types.</p>
+  <div class="code-wrap">
+<pre><code class="language-nova">data class Summary(headline: String, score: Float)
+
+ai fn summarize(text: String) -&gt; Summary
+  model = "nova-mock-1"
+  temperature = 0.3
+{
+  prompt("Summarize in one sentence: " + text)
+}
+
+let s = summarize("Nova is a programming language designed by AI, for AI.")
+print(s.headline)   // typed. structured. no JSON.parse roulette.</code></pre>
+  </div>
+</section>
+
+<section class="section" style="text-align:center">
+  <h2>Stop choosing between safe and expressive.</h2>
+  <p class="lede" style="margin-left:auto;margin-right:auto">Nova is the Java pro-max: everything Java promised about safety, everything React promised about UI &mdash; minus the parts that wasted your decade.</p>
+  <div class="hero-ctas">
+    <a class="btn btn-primary" href="download.html">Get Nova</a>
+    <a class="btn btn-ghost" href="docs/tutorial.html">Learn it in 30 minutes</a>
+  </div>
+</section>
+</main>
+
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="js/main.js"></script>
+</body>
+</html>

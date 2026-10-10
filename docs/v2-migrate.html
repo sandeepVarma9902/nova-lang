@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nova migrate — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1><code>nova migrate</code> — mechanical Java/JSX → Nova migration (v2)</h1>
+<p>&gt; <strong>EXPERIMENTAL.</strong> <code>nova migrate --from java|jsx &lt;file&gt;</code> converts the most &gt; mechanical subset of Java / React-JSX to Nova. It is a mapping assistant, &gt; not a transpiler: every construct it cannot convert is preserved as a &gt; <code>// UNCONVERTED</code> / <code>// WARNING</code> comment <strong>and</strong> reported as a warning with &gt; a source line number (stdout carries the Nova code, stderr carries the &gt; warnings, and a warnings summary is appended to the file itself). Nothing &gt; is silently dropped. Review every line before you <code>nova check</code> it. &gt; &gt; The conceptual mappings live in <a href="./migration-guide.html">migration-guide.md</a> &gt; (the v1 source of truth). This document describes exactly what the <em>tool</em> &gt; does mechanically, what it warns about, and where it stops.</p>
+<p>Workflow: <code>nova migrate --from java Foo.java &gt; Foo.nova</code> → <code>nova fmt</code> → <code>nova check</code> → work through each diagnostic and each <code>// WARNING</code> → <code>nova lock</code> when imports settle.</p>
+<hr>
+<h2>Table A — Java → Nova (mechanical subset)</h2>
+<table><thead><tr><th>Java</th><th>Nova</th><th>Notes</th></tr></thead><tbody><tr><td><code>class C { ... }</code></td><td><code>class C { ... }</code></td><td>Same shape</td></tr><tr><td><code>interface I { ... }</code></td><td><code>interface I { ... }</code></td><td>Signatures as <code>fn</code>; <code>default</code> methods warn</td></tr><tr><td><code>record R(...)</code> / pure bean (fields + ctor + getters/setters)</td><td><code>data class R(...)</code></td><td>Getters/setters/<code>equals</code>/<code>hashCode</code>/<code>toString</code> folded away (warned)</td></tr><tr><td>bean <strong>with setters</strong></td><td><code>class</code> with <code>var</code> fields + <code>init</code></td><td>Data classes are immutable; mutable beans stay classes</td></tr><tr><td>constructor <code>C(...)</code></td><td><code>init(...)</code></td><td><code>super(...)</code> preserved; <code>this(...)</code> chaining warns</td></tr><tr><td><code>extends B</code> / <code>implements I, J</code></td><td><code>extends B</code> / <code>implements I, J</code></td><td>Generics erased with a warning</td></tr><tr><td>getters <code>getX()</code> / <code>isX()</code></td><td>folded into the field</td><td>Only when a matching field exists</td></tr><tr><td>setters <code>setX(v)</code></td><td>folded → <code>var</code> field</td><td>Warned; data-class path not taken</td></tr><tr><td>calls <code>o.getX()</code> / <code>o.setX(v)</code></td><td><code>o.x</code> / <code>o.x = v</code></td><td>Rewritten wherever the accessor was folded</td></tr><tr><td><code>@Override</code></td><td><code>override</code></td><td>Other annotations warn + drop</td></tr><tr><td><code>static</code> method / field</td><td>module-level <code>fn</code> / <code>let</code></td><td>Warned (&quot;hoisted&quot;)</td></tr><tr><td><code>int/long/short/byte</code>, wrappers</td><td><code>Int</code></td><td><code>long</code> suffix stripped (warned)</td></tr><tr><td><code>double/float</code>, wrappers</td><td><code>Float</code></td><td><code>f</code> suffix stripped (warned)</td></tr><tr><td><code>String</code>, <code>boolean</code>, <code>Object</code>, <code>char</code></td><td><code>String</code>, <code>Bool</code>, <code>Any</code>, <code>String</code></td><td><code>char</code> literals become <code>&quot;c&quot;</code> (warned)</td></tr><tr><td><code>List&lt;X&gt;</code> / <code>X[]</code> / <code>ArrayList&lt;X&gt;</code></td><td><code>List[X]</code></td><td><code>Set&lt;X&gt;</code> → <code>List[X]</code> + warning (dedup lost)</td></tr><tr><td><code>Optional&lt;X&gt;</code></td><td><code>Option[X]</code></td><td><code>Optional.of/empty</code> → <code>Some/None</code></td></tr><tr><td><code>Map&lt;K,V&gt;</code> and friends</td><td><code>Any</code></td><td><strong>Warning</strong> — no Nova equivalent; model by hand</td></tr><tr><td>other generics <code>Foo&lt;Bar&gt;</code></td><td><code>Any</code></td><td><strong>Warning</strong> — generics erased</td></tr><tr><td>unknown types</td><td><code>Any</code></td><td><strong>Warning</strong> — annotate by hand</td></tr><tr><td><code>int x = e;</code> (local)</td><td><code>var x: Int = e</code></td><td><code>final</code> → <code>let</code>; no-init → zero value + warning</td></tr><tr><td><code>x++</code> / <code>x--</code> / <code>x op= e</code></td><td><code>x = x + 1</code> / <code>x = x - 1</code> / <code>x = x op (e)</code></td><td></td></tr><tr><td><code>if (c)</code> / <code>else if</code> / <code>else</code></td><td><code>if c</code> / <code>else if c</code> / <code>else</code></td><td></td></tr><tr><td><code>while (c)</code></td><td><code>while c</code></td><td></td></tr><tr><td><code>do { } while (c);</code></td><td><code>while true { ...; if not (c) { break } }</code></td><td><strong>Warning</strong> — verify</td></tr><tr><td><code>for (T x : xs)</code></td><td><code>for x in xs</code></td><td></td></tr><tr><td><code>for (init; c; upd)</code></td><td><code>init</code> + <code>while c { ...; upd }</code></td><td><strong>Warning</strong> — bounds made explicit, verify</td></tr><tr><td><code>switch</code></td><td><code>if/else-if</code> chain on <code>==</code></td><td><strong>Warning</strong>; fall-through flagged; stacked cases merge with <code>or</code></td></tr><tr><td><code>x == null</code> / <code>x != null</code></td><td>commented <code>match</code> skeleton + original preserved</td><td><strong>Warning</strong> — model as <code>Option</code>, Recipe 4</td></tr><tr><td><code>try { } catch (E e) { }</code></td><td>try-body kept; handler as comments</td><td><strong>Warning</strong> — rewrite as <code>Result</code> + <code>?</code> + <code>match</code>, Recipe 2</td></tr><tr><td><code>throw new E(msg)</code> in a <code>throws</code> method</td><td><code>return Err(msg)</code>; method → <code>-&gt; Result[T, String]</code></td><td><strong>Warning</strong> — error type flattened, pick a real one</td></tr><tr><td><code>throw</code> elsewhere</td><td><code>// UNCONVERTED</code></td><td><strong>Warning</strong> — Nova has no exceptions</td></tr><tr><td><code>synchronized</code></td><td>body kept, lock dropped</td><td><strong>Warning</strong></td></tr><tr><td><code>System.out.println(x)</code></td><td><code>print(x)</code></td><td>Method guessed <code>effect</code> (warned — review)</td></tr><tr><td><code>new Foo(a)</code></td><td><code>Foo(a)</code></td><td></td></tr><tr><td><code>new ArrayList&lt;&gt;()</code></td><td><code>[]</code></td><td>Copy-construction warns</td></tr><tr><td><code>&amp;&amp;</code> / `\</td><td>\</td><td><code> / </code>!x`</td><td><code>and</code> / <code>or</code> / <code>not x</code></td><td></td></tr><tr><td><code>c ? a : b</code></td><td><code>if c { a } else { b }</code></td><td></td></tr><tr><td><code>s.length()</code> / <code>l.size()</code> / <code>a.length</code></td><td><code>len(s)</code> / <code>len(l)</code> / <code>len(a)</code></td><td></td></tr><tr><td><code>l.add(x)</code> / <code>l.get(i)</code></td><td><code>l.push(x)</code> / <code>l[i]</code></td><td>For known <code>List</code> vars; otherwise warned</td></tr><tr><td><code>a.equals(b)</code></td><td><code>(a == b)</code></td><td></td></tr><tr><td><code>x.toString()</code> / <code>String.valueOf(x)</code></td><td><code>str(x)</code></td><td></td></tr><tr><td><code>Integer.parseInt</code> / <code>Long.parseLong</code> / <code>Double.parseDouble</code></td><td><code>int(...)</code> / <code>int(...)</code> / <code>float(...)</code></td><td></td></tr><tr><td><code>Boolean.parseBoolean(s)</code></td><td><code>(s == &quot;true&quot;)</code></td><td>Warned</td></tr><tr><td><code>(Type) x</code> casts</td><td><code>x</code></td><td><strong>Warning</strong> — Nova has no casts</td></tr><tr><td><code>import java.util.List</code> etc.</td><td><em>(dropped)</em></td><td>Built in; correct, no warning</td></tr><tr><td><code>import com.foo.Bar</code></td><td><code>import bar</code></td><td><strong>Warning</strong> — VERIFY the module mapping</td></tr><tr><td><code>import static ...</code> / wildcard <code>.*</code></td><td>dropped</td><td><strong>Warning</strong></td></tr><tr><td>nested classes</td><td>hoisted to top level</td><td><strong>Warning</strong> — verify scoping</td></tr><tr><td><code>enum</code></td><td><code>// UNCONVERTED</code></td><td><strong>Warning</strong> — model as data class + constants</td></tr></tbody></table>
+<h2>Table B — JSX → Nova (mechanical subset)</h2>
+<table><thead><tr><th>JSX</th><th>Nova</th><th>Notes</th></tr></thead><tbody><tr><td><code>function C({...})</code> / <code>const C = (...) =&gt;</code></td><td><code>component C(...)</code></td><td>Capitalized name = component (React convention)</td></tr><tr><td>destructured props <code>{a, b}</code></td><td>params <code>a: Any, b: Any</code></td><td><strong>Warning per prop</strong> — untyped JS, annotate</td></tr><tr><td><code>(props)</code> + <code>props.x</code> uses</td><td>params harvested from uses</td><td><strong>Warning</strong> — annotate types</td></tr><tr><td>prop defaults <code>{a = 1}</code></td><td>dropped</td><td><strong>Warning</strong> — Nova has no default params</td></tr><tr><td><code>const [x, setX] = useState(v)</code></td><td><code>state x: T = v</code></td><td><code>T</code> inferred from literals; <code>[]</code> → <code>List[Any]</code> + warning; <code>{}</code> → warning (model as data class)</td></tr><tr><td><code>setX(e)</code></td><td><code>x = e</code></td><td></td></tr><tr><td><code>setX(p =&gt; expr)</code></td><td><code>x = expr[p:=x]</code></td><td>Updater param substituted</td></tr><tr><td><code>arr.map(x =&gt; &lt;li&gt;...&lt;/li&gt;)</code></td><td><code>&lt;for x in arr&gt;...&lt;/for&gt;</code></td><td><code>key=</code> dropped + warning; parenthesized callbacks <code>p =&gt; (&lt;div/&gt;)</code> handled</td></tr><tr><td><code>{cond &amp;&amp; &lt;A/&gt;}</code></td><td><code>&lt;if cond&gt;</code></td><td>Complex conditions → <code>&lt;if cond={...}&gt;</code> + warning</td></tr><tr><td><code>{c ? &lt;A/&gt; : &lt;B/&gt;}</code></td><td>two <code>&lt;if&gt;</code> blocks</td><td><strong>Warning</strong> — Nova <code>&lt;if&gt;</code> has no else; verify</td></tr><tr><td><code>{c ? a : b}</code> (values)</td><td><code>{if c { a } else { b }}</code></td><td>Nova if-expressions</td></tr><tr><td><code>onClick={() =&gt; setX(...)}</code></td><td><code>onClick={x = ...}</code></td><td>Handlers are single expressions</td></tr><tr><td><code>const h = (p) =&gt; ...</code> + <code>onClick={() =&gt; h(x)}</code></td><td>handler body inlined with args substituted</td><td>Template consts are not emitted separately</td></tr><tr><td><code>setX([...x, e])</code></td><td><code>x.push(e)</code></td><td>Append-pattern only; other spreads warn + drop</td></tr><tr><td><code>const C = ({t}) =&gt; &lt;h1&gt;{t}&lt;/h1&gt;</code></td><td><code>component C(t: Any)</code></td><td>Expression-bodied arrows supported</td></tr><tr><td><code>onClick={handler}</code></td><td><code>onClick={handler()}</code></td><td><strong>Warning</strong> — bare ref emitted as call; verify</td></tr><tr><td>arrow with <code>(e)</code> param</td><td>param dropped</td><td><strong>Warning</strong> — no event object in Nova</td></tr><tr><td>multi-statement handler</td><td>attribute dropped</td><td><strong>Warning</strong> — extract to an <code>effect fn</code></td></tr><tr><td><code>className=</code></td><td><code>class=</code></td><td><code>htmlFor</code> → <code>for</code></td></tr><tr><td><code>{expr}</code></td><td><code>{expr}</code></td><td><code>===</code>→<code>==</code>, <code>&amp;&amp;</code>→<code>and</code>, template literals → <code>&quot;a&quot; + str(b)</code></td></tr><tr><td><code>const x = &lt;expr&gt;</code> in body</td><td>inlined at <code>{x}</code> uses in the view</td><td><strong>Warning</strong> — verify</td></tr><tr><td><code>const h = () =&gt; ...</code> in body</td><td>inlined at <code>onX={h}</code></td><td>Handler template</td></tr><tr><td>plain <code>function f()</code> (lowercase)</td><td>module-level <code>fn f(...)</code></td><td>Params <code>Any</code> + warning</td></tr><tr><td><code>import React</code> / <code>react-dom</code></td><td><em>(dropped)</em></td><td>The framework; correct, no warning</td></tr><tr><td><code>import &#x27;./x.css&#x27;</code></td><td><em>(dropped)</em></td><td><strong>Warning</strong> — Nova views have no stylesheets</td></tr><tr><td><code>import X from &#x27;./X&#x27;</code></td><td><code>import x</code></td><td><strong>Warning</strong> — VERIFY the module mapping</td></tr><tr><td><code>import axios from &#x27;axios&#x27;</code></td><td><em>(dropped)</em></td><td><strong>Warning</strong> — no Nova equivalent</td></tr></tbody></table>
+<hr>
+<h2>Warning catalog (every warning points at a source line)</h2>
+<p><strong>Java</strong></p>
+<ul>
+<li><code>type &#x27;X&#x27; has no Nova mapping — emitted as Any</code> · <code>generics on &#x27;X&#x27; are erased</code></li>
+<li><code>Map has no Nova equivalent (v1)</code> · <code>Set -&gt; List (dedup semantics lost)</code></li>
+<li><code>null check on &#x27;x&#x27; — model as Option and handle with match</code></li>
+<li><code>&#x27;throw&#x27; -&gt; &#x27;return Err(...)&#x27;</code> / <code>checked exception &#x27;E&#x27; flattened to Result[_, String]</code></li>
+<li><code>try/catch -&gt; Result[_, String] + &#x27;?&#x27; + match</code> · <code>&#x27;finally&#x27; has no Nova equivalent</code></li>
+<li><code>C-style for -&gt; while loop</code> · <code>&#x27;do/while&#x27; rewritten as &#x27;while true&#x27;</code></li>
+<li><code>&#x27;switch&#x27; -&gt; if/else-if chain</code> · <code>switch fall-through in case ...</code></li>
+<li><code>&#x27;synchronized&#x27; dropped</code> · <code>cast &#x27;(T)&#x27; dropped</code> · <code>&#x27;instanceof&#x27; has no Nova equivalent</code></li>
+<li><code>lambda &#x27;-&gt;&#x27; — Nova has no first-class functions</code> · <code>method reference &#x27;::&#x27;</code></li>
+<li><code>static members of &#x27;C&#x27; hoisted to module level</code></li>
+<li><code>multiple constructors — Nova has no overloading; only the first is converted</code></li>
+<li><code>constructor chaining &#x27;this(...)&#x27;</code> · <code>abstract ... — Nova has no abstract</code></li>
+<li><code>import &#x27;com.foo.Bar&#x27; -&gt; &#x27;import bar&#x27; — VERIFY the module mapping</code></li>
+<li><code>&#x27;enum X&#x27; — Nova has no enums</code> · <code>nested class &#x27;I&#x27; hoisted to top level</code></li>
+<li><code>no initializer for &#x27;x&#x27; — Nova requires one; zero value ... used</code></li>
+<li><code>method &#x27;m&#x27; marked &#x27;effect&#x27; (calls print) — review effect placement</code></li>
+</ul>
+<p><strong>JSX</strong></p>
+<ul>
+<li><code>prop &#x27;x&#x27; is untyped (JS) — emitted as Any</code> · <code>props object &#x27;p&#x27; destructured into params</code></li>
+<li><code>default value for prop &#x27;x&#x27; dropped — Nova has no default params</code></li>
+<li><code>useState([]) — element type unknown</code> · <code>object-literal state — model as a data class</code></li>
+<li><code>&#x27;useEffect&#x27; — no direct equivalent</code> (cleanup especially) · <code>&#x27;useRef&#x27;/&#x27;useMemo&#x27;/... — no Nova equivalent</code></li>
+<li><code>JSX ternary -&gt; two &lt;if&gt; blocks</code> · <code>complex &lt;if&gt; condition ... emitted as cond={...}</code></li>
+<li><code>&#x27;.map()&#x27; with a key= attribute drops the key</code></li>
+<li><code>event parameter(s) ... dropped — Nova handlers receive no event object</code></li>
+<li><code>multi-statement event handler — ... extract to an effect fn</code></li>
+<li><code>&#x27;style={{...}}&#x27; (CSS-in-JS) dropped</code> · <code>spread attributes &#x27;{...p}&#x27; dropped</code></li>
+<li><code>&#x27;dangerouslySetInnerHTML&#x27; dropped</code></li>
+<li><code>external package &#x27;x&#x27; has no Nova equivalent</code> · <code>stylesheet import ... dropped</code></li>
+<li><code>&#x27;x&#x27; is async — Nova&#x27;s async model differs; &#x27;await&#x27; dropped</code></li>
+<li><code>&#x27;?.&#x27; optional chaining -&gt; plain &#x27;.&#x27;</code> · <code>&#x27;??&#x27; — right side dropped; use match on Option</code></li>
+<li><code>spread &#x27;...&#x27; has no Nova equivalent — dropped</code></li>
+<li><code>arrow function &#x27;=&gt;&#x27; — Nova has no first-class functions</code></li>
+</ul>
+<hr>
+<h2>Honest limits (what the tool will never do for you)</h2>
+<p>1. <strong>Effects and capabilities.</strong> <code>print</code> presence guesses <code>effect</code>; everything    else is unmarked <code>fn</code>. Expect <code>E_EFFECT</code> on first <code>nova check</code> — annotate    deliberately. <code>effect io</code>/<code>net</code> functions need their <code>IO</code>/<code>Net</code> parameter    threaded from the entry module; that wiring is a design decision. 2. <strong>Error types.</strong> Checked exceptions flatten to <code>Result[T, String]</code>. Pick a    real error type per call chain. 3. <strong>Nullability.</strong> <code>x != null</code> becomes a commented recipe, not code — only    you know which bindings are <code>Option[T]</code>. 4. <strong>Generics.</strong> Everything beyond <code>List</code>/<code>Option</code> is erased to <code>Any</code>. 5. <strong>No semantic understanding.</strong> Name shadowing, overload resolution,    dynamic dispatch subtleties, and reflection-driven behavior are invisible    to a line/brace mapper. The output parses; &quot;parses&quot; is not &quot;correct&quot;. 6. <strong>JSX is untyped.</strong> Every prop and helper param arrives as <code>Any</code>. The    warnings tell you exactly which lines to annotate. 7. <strong>Styling and DOM.</strong> CSS, inline styles, refs, event objects, and    <code>dangerouslySetInnerHTML</code> have no Nova counterpart — they are dropped    loudly, never silently.</p>
+<p>A full transpiler is future work (see ROADMAP.md). Until then: this tool does the typing, you do the thinking.</p>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>
