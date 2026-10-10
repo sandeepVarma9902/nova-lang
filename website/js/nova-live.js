@@ -84,6 +84,7 @@
         }), TIMEOUT_MS, "source manifest");
       })
       .then(function (files) {
+        try { pyodide.FS.mkdir("/nova_py"); } catch (e) { /* exists */ }
         var loads = files.filter(function (f) { return f !== "files.json"; })
           .map(function (f) {
             return fetch(base + f).then(function (r) {

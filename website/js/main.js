@@ -34,51 +34,41 @@
   });
 
   /* minimal Nova highlighter */
-  var KEYWORDS = ("let var fn effect class interface extends implements data init this super " +
-    "component state view import if else while for in match return requires ensures " +
-    "result and or not true false Some None Ok Err override ai spawn stream async " +
-    "spawn_async nursery context provide consume app resource secret env docker deploy").split(" ");
-  var TYPES = ["Int", "Float", "String", "Bool", "Unit", "List", "Option", "Result",
-    "Task", "Stream", "Subscription", "Message", "Map", "Set"];
 
   function esc(s) {
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
+  /* Single-pass tokenizer: one regex walk over the ORIGINAL source, so
+   * inserted <span> markup can never be re-matched (notably the keyword
+   * `class` must not match the class= attribute we just emitted). */
+  var HIGHLIGHT_RE = /("(?:[^"\\]|\\.)*"|\/\/[^\n]*)|\b(\d+(?:\.\d+)?)\b|\b(Int|Float|String|Bool|Unit|List|Option|Result|Task|Stream|Subscription|Message|Map|Set)\b(?!\s*\()|\b(spawn_async|let|var|fn|effect|class|interface|extends|implements|data|init|this|super|component|state|view|import|if|else|while|for|in|match|return|requires|ensures|result|and|or|not|true|false|Some|None|Ok|Err|override|ai|spawn|nursery|context|provide|consume|app|resource|secret|env|docker|deploy)\b|\b([A-Za-z_][A-Za-z0-9_]*)(?=\s*\()|(<)(\/?)([A-Za-z][A-Za-z0-9]*)/g;
+
   function highlight(src) {
-    // strings first (protect them from keyword matching)
-    var parts = [];
-    var re = /("(?:[^"\\]|\\.)*"|\/\/[^\n]*)/g;
-    var last = 0, m;
-    var out = "";
-    function codeSeg(seg) {
-      seg = esc(seg);
-      // comments already handled; numbers
-      seg = seg.replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="tok-num">$1</span>');
-      // types
-      TYPES.forEach(function (t) {
-        seg = seg.replace(new RegExp("\\b" + t + "\\b(?!\\s*\\()", "g"),
-          '<span class="tok-type">' + t + "</span>");
-      });
-      // keywords
-      KEYWORDS.forEach(function (k) {
-        seg = seg.replace(new RegExp("\\b" + k + "\\b", "g"),
-          '<span class="tok-kw">' + k + "</span>");
-      });
-      // function calls
-      seg = seg.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()/g, '<span class="tok-fn">$1</span>');
-      // JSX-ish tags
-      seg = seg.replace(/(&lt;\/?)([a-zA-Z][a-zA-Z0-9]*)/g, '$1<span class="tok-tag">$2</span>');
-      return seg;
-    }
-    while ((m = re.exec(src)) !== null) {
-      out += codeSeg(src.slice(last, m.index));
-      var tok = m[0];
-      if (tok.indexOf("//") === 0) out += '<span class="tok-com">' + esc(tok) + "</span>";
-      else out += '<span class="tok-str">' + esc(tok) + "</span>";
+    var out = "", last = 0, m;
+    HIGHLIGHT_RE.lastIndex = 0;
+    while ((m = HIGHLIGHT_RE.exec(src)) !== null) {
+      out += esc(src.slice(last, m.index));
+      var tok = m[0], cls = null, html = null;
+      if (m[1] !== undefined) {
+        cls = (tok.indexOf("//") === 0) ? "tok-com" : "tok-str";
+        html = '<span class="' + cls + '">' + esc(tok) + "</span>";
+      } else if (m[2] !== undefined) {
+        html = '<span class="tok-num">' + esc(tok) + "</span>";
+      } else if (m[3] !== undefined) {
+        html = '<span class="tok-type">' + esc(tok) + "</span>";
+      } else if (m[4] !== undefined) {
+        html = '<span class="tok-kw">' + esc(tok) + "</span>";
+      } else if (m[5] !== undefined) {
+        html = '<span class="tok-fn">' + esc(tok) + "</span>";
+      } else if (m[6] !== undefined) {
+        html = "&lt;" + m[7] + '<span class="tok-tag">' + esc(m[8]) + "</span>";
+      }
+      out += html;
       last = m.index + tok.length;
+      if (tok.length === 0) { HIGHLIGHT_RE.lastIndex++; }
     }
-    out += codeSeg(src.slice(last));
+    out += esc(src.slice(last));
     return out;
   }
 

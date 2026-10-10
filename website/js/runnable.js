@@ -12,6 +12,11 @@
 
   var OFFLINE_HINT = "live run needs network — try the Playground";
 
+  function offlineReason() {
+    var err = window.NovaLive && window.NovaLive.lastError;
+    return OFFLINE_HINT + (err ? " (" + err + ")" : "");
+  }
+
   function esc(s) {
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -129,7 +134,7 @@
 
       runBtn.addEventListener("click", function () {
         if (!liveAvailable) {
-          status.textContent = OFFLINE_HINT;
+          status.textContent = offlineReason();
           return;
         }
         runBtn.disabled = true;
@@ -137,8 +142,8 @@
         status.textContent = "loading interpreter\u2026";
         window.NovaLive.ensure().then(function (ok) {
           if (!ok) {
-            status.textContent = OFFLINE_HINT;
-            runBtn.title = OFFLINE_HINT;
+            status.textContent = offlineReason();
+            runBtn.title = offlineReason();
             runBtn.disabled = false;
             return;
           }
@@ -156,7 +161,7 @@
           runBtn.disabled = false;
         });
       });
-      if (!liveAvailable) runBtn.title = OFFLINE_HINT;
+      if (!liveAvailable) runBtn.title = offlineReason();
     }
 
     /* swap into the page: replace the .code-wrap main.js added (or the pre) */
