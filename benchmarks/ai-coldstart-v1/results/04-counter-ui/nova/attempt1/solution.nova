@@ -1,0 +1,13 @@
+component Counter(title: String) {
+  state count: Int = 0
+  view {
+    <div>
+      <h1>{title}</h1>
+      <p>{count}</p>
+      <button onClick={count = count + 1}>Increment</button>
+    </div>
+  }
+}
+
+let app = render(Counter(title: "Clicks"))
+app.fire("onClick")

@@ -1,0 +1,14 @@
+import solution
+effect fn main() {
+  assert(solution.classify(-3) == "negative", "classify(-3)")
+  assert(solution.classify(0) == "zero", "classify(0)")
+  assert(solution.classify(5) == "small", "classify(5)")
+  assert(solution.classify(9) == "small", "classify(9)")
+  assert(solution.classify(10) == "big", "classify(10)")
+  assert(solution.classify(99) == "big", "classify(99)")
+  assert(solution.sum_evens([1, 2, 3, 4, 5]) == 6, "sum_evens basic")
+  assert(solution.sum_evens([]) == 0, "sum_evens empty")
+  assert(solution.sum_evens([1, 3, 5]) == 0, "sum_evens none")
+  print("DRIVER OK")
+}
+main()

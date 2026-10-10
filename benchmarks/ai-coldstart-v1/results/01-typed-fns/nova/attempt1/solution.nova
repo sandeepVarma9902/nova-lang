@@ -1,0 +1,22 @@
+fn classify(n: Int) -> String {
+  if n < 0 {
+    return "negative"
+  }
+  if n == 0 {
+    return "zero"
+  }
+  if n <= 9 {
+    return "small"
+  }
+  return "big"
+}
+
+fn sum_evens(xs: List[Int]) -> Int {
+  var total = 0
+  for x in xs {
+    if x % 2 == 0 {
+      total = total + x
+    }
+  }
+  return total
+}

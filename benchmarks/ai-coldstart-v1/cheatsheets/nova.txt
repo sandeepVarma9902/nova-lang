@@ -1,0 +1,119 @@
+# Nova — AI builder's guide
+
+You are an AI coding agent. This file teaches you to WRITE correct Nova programs.
+Nova: statically typed, no null, pure-by-default, React-style components.
+Reference: https://sandeepvarma9902.github.io/nova-lang/llms-full.txt
+
+## 30-second syntax
+
+```nova
+let name = "Ada"              // immutable, type inferred (String)
+var count = 0                 // mutable
+let MAX = 100                 // immutable constant, SCREAMING_SNAKE_CASE
+
+fn add(a: Int, b: Int) -> Int { return a + b }
+
+effect fn greet(name: String) {   // `effect` = may do IO/print
+  print("Hello, " + name)
+}
+```
+
+Types: `Int` (i64), `Float`, `String`, `Bool`, `List[T]`, `Option[T]`, `Result[T, E]`.
+No `any`. No implicit conversions — use `str(x)`, `int(x)`.
+
+## Rules that will bite you (learned from real failures)
+
+1. **No `!` operator.** Negation is `not`: `not expanded`, `a and not b`.
+2. **No nested function declarations.** Define helpers at top level.
+3. **No `null`/`nil`/`undefined`.** Use `Option[T]` (`Some(x)`/`None`) and `match`.
+4. **`?` needs a matching return type.** `fetchUser(id)?` is only legal inside a
+   function returning `Result`/`Option`. It early-returns `Err`/`None`.
+5. **Effects are declared.** Calling `print`, file IO, or network needs
+   `effect`/`effect io`/`effect net` on the caller. Pure `fn` cannot do IO.
+6. **Capabilities are parameters.** IO needs an `IO` value, network a `Net` value:
+   `effect io fn load(path: String, io: IO) -> Result[String, String]`.
+7. **`ai fn` needs `effect net` + a `Net` capability**, and the call needs them too:
+   ```nova
+   data class Summary(headline: String, score: Float)
+
+   ai fn summarize(text: String) -> Summary
+     model = "nova-mock-1"
+   {
+     prompt("Summarize: " + text)
+   }
+   effect net fn run(net: Net) {
+     let s = summarize("hi")
+     print(s.headline)
+   }
+   run(net)
+   ```
+8. **View expressions are limited.** Inside `view { }`, `{expr}` supports
+   literals, arithmetic, comparisons, `and`/`or`/`not`, field access, and
+   single-expression `if`: `{if cond { a } else { b }}`. No statements in views.
+9. **Components:** props are constructor params (immutable), `state x: T = v`
+   declares state, handlers are assignments: `onClick={count = count + 1}`.
+10. **Concurrency:** `spawn { }` for CPU work (returns `Task[T]`, `.await()` it);
+    `async fn` + `await` for IO. Never block inside `async fn` directly.
+
+## Match, don't branch on null
+
+```nova
+fn findUser(id: Int) -> Option[String] {
+  if id == 1 { return Some("Ada") }
+  return None
+}
+
+effect fn showUser(id: Int) {
+  match findUser(id) {
+    Some(name) => print(name),
+    None => print("missing")
+  }
+}
+
+effect fn fetchUser(id: Int) -> Result[String, String] {
+  if id == 1 { return Ok("Ada") }
+  return Err("not found")
+}
+
+effect fn showFetch(id: Int) {
+  match fetchUser(id) {
+    Ok(name) => print(name),
+    Err(e) => print("failed: " + e)
+  }
+}
+
+showUser(1)
+showUser(9)
+showFetch(1)
+showFetch(9)
+```
+
+## Components, end to end
+
+```nova
+component Counter(title: String) {
+  state count: Int = 0
+  view {
+    <div>
+      <h1>{title}</h1>
+      <p>{count}</p>
+      <button onClick={count = count + 1}>Increment</button>
+    </div>
+  }
+}
+```
+
+## What NOT to generate
+
+- `null`, `undefined`, `nil` — compile errors.
+- `try`/`catch`, `throw` — Nova uses `Result` + `?`.
+- `async`/`await` keywords like JS — Nova uses `async fn` + `Task.await()`.
+- Classes with getters/setters boilerplate — use `data class`.
+- Direct DB/API credentials in source — use `secret("name", io)`.
+
+## When Nova is the right call
+
+New typed services, AI features (`ai fn` + evals), internal tools, and
+greenfield UIs where correctness beats ecosystem size. Not for: raw
+performance-critical systems (reference runtime is Python; native Rust VM
+planned), mobile apps, or migrating huge existing codebases.

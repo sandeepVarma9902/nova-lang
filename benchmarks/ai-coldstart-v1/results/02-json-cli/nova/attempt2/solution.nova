@@ -1,0 +1,81 @@
+data class User(name: String, age: Int, email: Option[String])
+
+fn toUser(item: Json) -> Option[User] {
+  let nameOpt = match jsonGet(item, "name") {
+    Some(j) => jsonStr(j),
+    None => None
+  }
+  let ageOpt = match jsonGet(item, "age") {
+    Some(j) => jsonInt(j),
+    None => None
+  }
+  let emailOpt = match jsonGet(item, "email") {
+    Some(j) => jsonStr(j),
+    None => None
+  }
+  match nameOpt {
+    Some(name) => match ageOpt {
+      Some(age) => Some(User(name: name, age: age, email: emailOpt)),
+      None => None
+    },
+    None => None
+  }
+}
+
+effect io fn summarize(io: IO) -> Result[String, String] {
+  let text = match readFile("data.json", io) {
+    Ok(t) => Ok(t),
+    Err(_) => Err("error: data.json not found")
+  }?
+  let parsed = match jsonParse(text) {
+    Ok(j) => Ok(j),
+    Err(_) => Err("error: malformed JSON")
+  }?
+  let items = match jsonList(parsed) {
+    Some(arr) => Ok(arr),
+    None => Err("error: malformed JSON")
+  }?
+  var count = 0
+  var ageSum = 0
+  var noEmail: List[String] = []
+  for item in items {
+    match toUser(item) {
+      Some(u) => {
+        count = count + 1
+        ageSum = ageSum + u.age
+        match u.email {
+          Some(_) => {},
+          None => noEmail.push(u.name)
+        }
+      },
+      None => {}
+    }
+  }
+  let avg = ageSum * 1.0 / count
+  var lines = "users: " + str(count) + "\n"
+  lines = lines + "avg_age: " + str(avg) + "\n"
+  lines = lines + "no_email: "
+  if len(noEmail) == 0 {
+    lines = lines + "none"
+  } else {
+    var first = true
+    for n in noEmail {
+      if first {
+        lines = lines + n
+        first = false
+      } else {
+        lines = lines + ", " + n
+      }
+    }
+  }
+  return Ok(lines)
+}
+
+effect io fn main(io: IO) {
+  match summarize(io) {
+    Ok(report) => print(report),
+    Err(e) => assert(false, e)
+  }
+}
+
+main(io)

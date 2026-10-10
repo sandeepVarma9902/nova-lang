@@ -1,0 +1,87 @@
+# TypeScript — agent cheat sheet (strict mode)
+
+## Basics
+
+```ts
+let name: string = "Ada";        // inferred types; annotations on function params
+const MAX: number = 100;         // prefer const
+function add(a: number, b: number): number { return a + b; }
+```
+
+Types: `number`, `string`, `boolean`, `string[]`, `number[]`.
+**No `any`.** Compile with `tsc --strict` — fix every error it reports.
+
+## Null handling
+
+`null`/`undefined` exist and are the #1 bug source. With `strict` on, use
+unions and narrow them:
+
+```ts
+function findUser(id: number): { name: string } | undefined {
+  return id === 1 ? { name: "Ada" } : undefined;
+}
+const u = findUser(1);
+if (u === undefined) { console.log("missing"); }
+else { console.log(u.name); }   // narrowed — safe here
+```
+
+Optional chaining: `user?.email`. Nullish coalescing: `email ?? "none"`.
+
+## Errors
+
+```ts
+function divide(a: number, b: number): number {
+  if (b === 0) throw new Error("divide by zero");
+  return a / b;
+}
+try { divide(1, 0); } catch (e) { console.error((e as Error).message); }
+```
+
+## JSON + files (node)
+
+```ts
+import { readFileSync } from "fs";
+const raw: string = readFileSync("data.json", "utf8");  // throws if missing
+const data: unknown = JSON.parse(raw);                   // throws if malformed
+if (!Array.isArray(data)) throw new Error("expected array");
+```
+
+Validate shapes before use — `unknown` forces you to check.
+
+## HTTP server (express)
+
+```bash
+npm install express
+```
+
+```ts
+import express from "express";
+const app = express();
+app.get("/users/:id", (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "bad id" }); return; }
+  const user = users.find(u => u.id === id);
+  if (!user) { res.status(404).json({ error: "not found" }); return; }
+  res.json(user);
+});
+app.listen(8931);
+```
+
+## Classes
+
+```ts
+class Counter {
+  private count = 0;
+  constructor(private title: string) {}
+  click(): void { this.count++; }
+  render(): string {
+    return `<div><h1>${this.title}</h1><p>${this.count}</p><button>Increment</button></div>`;
+  }
+}
+```
+
+## What NOT to do
+
+- `any` — defeats the compiler; the tests run under `--strict`.
+- Ignoring a possibly-`undefined` value — `strict` will flag it; handle it.
+- `==` — always use `===`.

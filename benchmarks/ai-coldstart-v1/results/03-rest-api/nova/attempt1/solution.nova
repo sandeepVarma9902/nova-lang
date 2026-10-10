@@ -1,0 +1,41 @@
+import std.web
+
+data class User(id: Int, name: String, email: String)
+
+fn findUser(id: Int) -> Option[User] {
+  if id == 1 {
+    return Some(User(id: 1, name: "Ada", email: "ada@example.com"))
+  }
+  if id == 2 {
+    return Some(User(id: 2, name: "Ben", email: "ben@example.com"))
+  }
+  if id == 3 {
+    return Some(User(id: 3, name: "Cara", email: "cara@example.com"))
+  }
+  return None
+}
+
+effect fn getUser(req: Request) -> Result[Response, Response] {
+  let id = match paramInt(req, "id") {
+    Some(i) => Ok(i),
+    None => Err(web.jsonErr(400, "missing id"))
+  }?
+  if id <= 0 {
+    return Err(web.jsonErr(400, "bad id"))
+  }
+  return match findUser(id) {
+    Some(u) => Ok(jsonResponse(200, u)),
+    None => Err(web.jsonErr(404, "no user " + str(id)))
+  }
+}
+
+effect io fn boot(cap: IO) {
+  let r = router()
+  get(r, "/users/{id: Int}", getUser, cap)
+  match serve(r, 8931, cap) {
+    Ok(_) => print("stopped"),
+    Err(e) => print("serve failed: " + e)
+  }
+}
+
+boot(io)

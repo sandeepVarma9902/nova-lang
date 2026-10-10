@@ -1,0 +1,70 @@
+effect io fn main(io: IO) {
+  let text = match readFile("data.json", io) {
+    Ok(t) => t,
+    Err(_) => {
+      print("error: data.json not found")
+      return
+    }
+  }
+  let parsed = match jsonParse(text) {
+    Ok(j) => j,
+    Err(_) => {
+      print("error: malformed JSON")
+      return
+    }
+  }
+  let items = match jsonList(parsed) {
+    Some(arr) => arr,
+    None => {
+      print("error: malformed JSON")
+      return
+    }
+  }
+  var count = 0
+  var ageSum = 0
+  var noEmail: List[String] = []
+  for item in items {
+    let nameOpt = jsonStr(jsonGet(item, "name"))
+    let ageOpt = jsonInt(jsonGet(item, "age"))
+    match nameOpt {
+      Some(name) => {
+        match ageOpt {
+          Some(age) => {
+            count = count + 1
+            ageSum = ageSum + age
+            match jsonStr(jsonGet(item, "email")) {
+              Some(_) => {},
+              None => { noEmail.push(name) }
+            }
+          },
+          None => {}
+        }
+      },
+      None => {}
+    }
+  }
+  print("users: " + str(count))
+  let avg = ageSum * 1.0 / count
+  print("avg_age: " + str(avg))
+  if len(noEmail) == 0 {
+    print("no_email: none")
+  } else {
+    print("no_email: " + joinNames(noEmail))
+  }
+}
+
+fn joinNames(names: List[String]) -> String {
+  var out = ""
+  var first = true
+  for n in names {
+    if first {
+      out = n
+      first = false
+    } else {
+      out = out + ", " + n
+    }
+  }
+  return out
+}
+
+main(io)

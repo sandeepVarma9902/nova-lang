@@ -1,0 +1,92 @@
+data class User(name: String, age: Int, email: Option[String])
+
+fn toUser(item: Json) -> Option[User] {
+  let nameOpt = match jsonGet(item, "name") {
+    Some(j) => jsonStr(j),
+    None => None
+  }
+  let ageOpt = match jsonGet(item, "age") {
+    Some(j) => jsonInt(j),
+    None => None
+  }
+  let emailOpt = match jsonGet(item, "email") {
+    Some(j) => jsonStr(j),
+    None => None
+  }
+  match nameOpt {
+    Some(name) => match ageOpt {
+      Some(age) => Some(User(name: name, age: age, email: emailOpt)),
+      None => None
+    },
+    None => None
+  }
+}
+
+fn toUserList(item: Json) -> List[User] {
+  match toUser(item) {
+    Some(u) => [u],
+    None => []
+  }
+}
+
+effect io fn summarize(io: IO) -> Result[String, String] {
+  let text = match readFile("data.json", io) {
+    Ok(t) => Ok(t),
+    Err(_) => Err("error: data.json not found")
+  }?
+  let parsed = match jsonParse(text) {
+    Ok(j) => Ok(j),
+    Err(_) => Err("error: malformed JSON")
+  }?
+  let items = match jsonList(parsed) {
+    Some(arr) => Ok(arr),
+    None => Err("error: malformed JSON")
+  }?
+  var users: List[User] = []
+  for item in items {
+    for u in toUserList(item) {
+      users.push(u)
+    }
+  }
+  var ageSum = 0
+  for u in users {
+    ageSum = ageSum + u.age
+  }
+  var noEmail: List[String] = []
+  for u in users {
+    let missing = match u.email {
+      Some(_) => false,
+      None => true
+    }
+    if missing {
+      noEmail.push(u.name)
+    }
+  }
+  let avg = ageSum * 1.0 / len(users)
+  var out = "users: " + str(len(users)) + "\n"
+  out = out + "avg_age: " + str(avg) + "\n"
+  out = out + "no_email: "
+  if len(noEmail) == 0 {
+    out = out + "none"
+  } else {
+    var first = true
+    for n in noEmail {
+      if first {
+        out = out + n
+        first = false
+      } else {
+        out = out + ", " + n
+      }
+    }
+  }
+  return Ok(out)
+}
+
+effect io fn main(io: IO) {
+  match summarize(io) {
+    Ok(report) => print(report),
+    Err(e) => assert(false, e)
+  }
+}
+
+main(io)

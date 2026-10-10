@@ -1,0 +1,121 @@
+# Python — agent cheat sheet (typed, 3.10+)
+
+## Basics
+
+```python
+name = "Ada"
+MAX = 100
+
+def add(a: int, b: int) -> int:
+    return a + b
+```
+
+Types: `int`, `float`, `str`, `bool`, `list[int]`, `dict[str, str]`.
+Hints are NOT enforced at runtime — wrong types fail late, in tests.
+
+## None handling
+
+`None` is the null. Check before use:
+
+```python
+def find_user(user_id: int) -> dict | None:
+    return {"name": "Ada"} if user_id == 1 else None
+
+u = find_user(1)
+if u is None:
+    print("missing")
+else:
+    print(u["name"])
+```
+
+`dict.get(key)` returns `None` for missing keys — check it.
+
+## Errors
+
+```python
+def divide(a: float, b: float) -> float:
+    if b == 0:
+        raise ValueError("divide by zero")
+    return a / b
+
+try:
+    divide(1, 0)
+except ValueError as e:
+    print(f"failed: {e}")
+```
+
+## JSON + files
+
+```python
+import json, sys
+
+try:
+    with open("data.json", encoding="utf8") as f:
+        data = json.load(f)          # raises FileNotFoundError / JSONDecodeError
+except FileNotFoundError:
+    print("error: data.json not found", file=sys.stderr)
+    sys.exit(1)
+except json.JSONDecodeError as e:
+    print(f"error: malformed JSON: {e}", file=sys.stderr)
+    sys.exit(1)
+
+if not isinstance(data, list):
+    print("error: expected a JSON array", file=sys.stderr)
+    sys.exit(1)
+```
+
+## HTTP server (stdlib only)
+
+```python
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+USERS = {1: {"id": 1, "name": "Ada"}, 2: {"id": 2, "name": "Ben"}}
+
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parts = self.path.strip("/").split("/")
+        if len(parts) == 2 and parts[0] == "users":
+            try:
+                uid = int(parts[1])
+            except ValueError:
+                return self._send(400, {"error": "bad id"})
+            if uid <= 0:
+                return self._send(400, {"error": "bad id"})
+            if uid not in USERS:
+                return self._send(404, {"error": "not found"})
+            return self._send(200, USERS[uid])
+        return self._send(404, {"error": "not found"})
+
+    def _send(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):  # silence request logs
+        pass
+
+HTTPServer(("127.0.0.1", 8931), H).serve_forever()
+```
+
+## Classes
+
+```python
+class Counter:
+    def __init__(self, title: str):
+        self.title = title
+        self.count = 0
+    def click(self) -> None:
+        self.count += 1
+    def render(self) -> str:
+        return f"<div><h1>{self.title}</h1><p>{self.count}</p><button>Increment</button></div>"
+```
+
+## What NOT to do
+
+- Trusting type hints — they don't run. Test everything.
+- Catching bare `except:` — it hides bugs.
+- Forgetting `if __name__ == "__main__":` guards in reusable modules (not needed here).
