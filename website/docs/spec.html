@@ -61,6 +61,10 @@
 <li>Integer literals are decimal; range-checked to signed 64-bit</li>
 </ul>
 <p>  (<code>E_INT_RANGE</code>). Float literals contain <code>.</code>. String literals are   <code>&quot;...&quot;</code> with <code>\</code> escapes.</p>
+<ul>
+<li>Naming conventions (normative style; <code>nova fmt</code> does not enforce these):</li>
+</ul>
+<p>  types (classes, interfaces, enums, data classes, components) are   <code>PascalCase</code>; functions, methods, variables, parameters are <code>camelCase</code>;   module-level constants are <code>SCREAMING_SNAKE_CASE</code>; type parameters are a   single capital letter (<code>T</code>, <code>E</code>, <code>K</code>, <code>V</code>); module files are <code>snake_case</code>   (<code>helpers.nova</code> imports as <code>import helpers</code>); test files are <code>*_test.nova</code>.   A leading <code>_</code> marks a module-private name (<code>_helper</code>). View tags must be   <code>CamelCase</code> (<code>&lt;UserCard&gt;</code>, never <code>&lt;user-card&gt;</code> — enforced by the parser,   §8). Acronyms are treated as words: <code>HttpRequest</code>, <code>userId</code>.</p>
 <h2>2. Type system</h2>
 <table><thead><tr><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>Int</code></td><td>signed 64-bit. <strong>Arithmetic is checked</strong>: overflow is a runtime error (<code>R_INT_OVERFLOW</code>), never silent wraparound.</td></tr><tr><td><code>Float</code></td><td>64-bit float</td></tr><tr><td><code>String</code></td><td>UTF-8 text</td></tr><tr><td><code>Bool</code></td><td><code>true</code> / <code>false</code></td></tr><tr><td><code>Unit</code></td><td><code>()</code> — the &quot;no value&quot; value</td></tr><tr><td><code>List[T]</code></td><td>growable list; <code>push</code> mutates</td></tr><tr><td><code>Option[T]</code></td><td><code>Some(v)</code> / <code>None</code> — the only &quot;missing value&quot;</td></tr><tr><td><code>Result[T, E]</code></td><td><code>Ok(v)</code> / <code>Err(e)</code> — the only error value</td></tr><tr><td><code>Task[T]</code></td><td>a spawned concurrent task; <code>task.await() : T</code></td></tr><tr><td><code>Stream[T]</code></td><td>a typed pub/sub topic handle</td></tr><tr><td><code>Subscription[T]</code></td><td>a consumer-group subscription on a stream</td></tr><tr><td><code>Message[T]</code></td><td>one consumed record: <code>topic: String</code>, <code>offset: Int</code>, <code>key: Option[String]</code>, <code>value: T</code></td></tr><tr><td><code>IO</code>, <code>Net</code></td><td><strong>capabilities</strong>: unconstructible, unforgeable; received as parameters</td></tr><tr><td>classes / interfaces / components</td><td>nominal, Java-like</td></tr></tbody></table>
 <p>No primitive/object duality: <code>Int</code> etc. are full types. No implicit conversions, ever (<code>E_TYPE_MISMATCH</code> suggests no coercion — convert explicitly with <code>str()</code> / <code>int()</code>). No operator overloading: <code>+ - * / % == != &lt; &lt;= &gt; &gt;=</code> mean exactly one thing. Boolean operators are the keywords <code>and</code> <code>or</code> <code>not</code>.</p>
@@ -291,6 +295,55 @@ ai fn summarize(text: String) -&gt; Summary
 </ul>
 <p>  and managed secret stores are v2 (ROADMAP.md).</p>
 <p>Full walkthrough: <code>docs/deployment.md</code>.</p>
+<h2>14b. Nova Boot (v2.1) — the web framework in the stdlib</h2>
+<p>Zero-config HTTP serving (<code>nova.std.web</code>, importable as <code>import std.web</code>):</p>
+<ul>
+<li><code>router()</code> builds a router; <code>get/post/put/delete/patch(r, path, handler, io)</code></li>
+</ul>
+<p>  (or <code>route(r, method, path, handler, io)</code>) register handlers.</p>
+<ul>
+<li>Typed path params: <code>/users/{id: Int}</code> — conversion failures are automatic</li>
+</ul>
+<p>  400s with structured JSON errors; unmatched routes are 404s.</p>
+<ul>
+<li>Handlers: <code>effect fn (req: Request) -&gt; Response</code>, or</li>
+</ul>
+<p>  <code>-&gt; Result[Response, Response]</code> where <code>Err(resp)</code> serves that HTTP   response (Result-to-HTTP error mapping).</p>
+<ul>
+<li>Middleware: <code>effect fn (req: Request) -&gt; Option[Response]</code>; <code>Some</code> short-</li>
+</ul>
+<p>  circuits, <code>None</code> continues. Registered with <code>use(r, mw)</code>.</p>
+<ul>
+<li>JSON: <code>reqJson(req)</code> is <code>Result[Json, String]</code>; <code>toJson(v)</code> serializes Nova</li>
+</ul>
+<p>  values (Nova types are the schema); <code>jsonResponse(status, v)</code> responds.</p>
+<ul>
+<li><code>staticDir(r, prefix, dir)</code> serves static files (traversal-safe).</li>
+<li><code>serve(r, port, io)</code> blocks forever; request logging is automatic.</li>
+<li><code>serve</code> needs the <code>IO</code> capability and is blocking (rejected in <code>async fn</code>).</li>
+</ul>
+<h2>14c. Database nativity (v2.1)</h2>
+<ul>
+<li><code>nova db pull --dsn sqlite:///app.db</code> generates <code>data class</code> models +</li>
+</ul>
+<p>  <code>fromJson</code> constructors and <code>.nova-schema.json</code> (sqlite only; postgres/   mysql need a driver — honest error, no stub).</p>
+<ul>
+<li>Query builder: `dbTable(db, t).select([...]).where(col, op, val)</li>
+</ul>
+<p>  .orderBy(col, dir).limit(n).all()<code> / </code>.first()<code>. Literal table/column   names are validated against </code>.nova-schema.json<code> at check time   (</code>E_DB_SCHEMA`, best effort).</p>
+<h2>11b. Vectors (v2.1) — RAG-native types</h2>
+<ul>
+<li><code>Vector[N]</code>: fixed-dimension embedding vectors; dimension mismatches are</li>
+</ul>
+<p>  <code>E_TYPE_MISMATCH</code> at check time.</p>
+<ul>
+<li><code>ai fn embed(text: String) -&gt; Vector[1536]</code> — mock provider, real</li>
+</ul>
+<p>  interface (deterministic pseudo-embeddings; swap the provider for real   vectors).</p>
+<ul>
+<li><code>similarity(a, b) -&gt; Float</code> (cosine), <code>topK(q, vecs, k) -&gt; List[Int]</code></li>
+</ul>
+<p>  (ranked indices).</p>
 <h2>15. Toolchain</h2>
 <p>One command, no toolchain maze:</p>
 <pre><code>nova run [--locked] file.nova|.nvb  run (auto-discovers app.nova for threading;
@@ -306,11 +359,16 @@ nova dom file.nova -o out.html  EXPERIMENTAL: components -&gt; self-contained HT
 nova eval suite.json [--provider mock|http] [--out report.json]
                                 eval harness: prompts -&gt; predicates -&gt; JSON
 nova lsp                        EXPERIMENTAL LSP server (JSON-RPC over stdio)
-nova deploy [--target local|docker|aws|gcp] [--env NAME]</code></pre>
+nova deploy [--target local|docker|aws|gcp] [--env NAME]
+nova db pull --dsn sqlite:///app.db [--out models.nova]
+                                schema -&gt; Nova model types + .nova-schema.json
+nova data export --from sqlite:///app.db --query &quot;SELECT ...&quot; --format jsonl
+                                fine-tuning datasets (train externally)
+nova test [dir]                 discover *_test.nova, run assertions, report</code></pre>
 <p><code>nova fmt</code> is canonical — there is exactly one way to format Nova code, enforced by the toolchain (AI-native: no style debates, no style tokens wasted).</p>
 <h2>16. Diagnostics</h2>
 <p>Every diagnostic is JSON: <code>{&quot;code&quot;, &quot;message&quot;, &quot;line&quot;, &quot;col&quot;, &quot;hint?&quot;}</code>. Stable codes (selection):</p>
-<table><thead><tr><th>Code</th><th>Meaning</th></tr></thead><tbody><tr><td><code>E_NO_NULL</code></td><td><code>null</code>/<code>nil</code>/<code>undefined</code> used — use <code>Option[T]</code></td></tr><tr><td><code>E_TYPE_MISMATCH</code></td><td>types don&#x27;t unify; no implicit conversions</td></tr><tr><td><code>E_UNHANDLED_OPTION</code></td><td><code>Option[T]</code> used where <code>T</code> expected</td></tr><tr><td><code>E_EFFECT</code></td><td>effect context insufficient</td></tr><tr><td><code>E_ASYNC_BLOCKING</code></td><td>blocking IO directly in an <code>async fn</code> — wrap in <code>spawn</code></td></tr><tr><td><code>E_QUESTION</code></td><td><code>?</code> misused (incl. directly in <code>spawn</code> blocks)</td></tr><tr><td><code>E_CAPABILITY</code></td><td><code>effect io</code>/<code>net</code> fn missing its capability parameter; capabilities constructed or shadowed</td></tr><tr><td><code>E_IMMUTABLE</code></td><td>assignment to immutable binding/prop/let-field</td></tr><tr><td><code>E_INT_RANGE</code> / <code>R_INT_OVERFLOW</code></td><td>literal out of i64 range / arithmetic overflow</td></tr><tr><td><code>E_NON_EXHAUSTIVE</code></td><td><code>match</code> misses a variant</td></tr><tr><td><code>E_IMPORT</code> / <code>E_LOCK</code></td><td>module problems / lockfile mismatch</td></tr><tr><td><code>E_AI_SCHEMA</code> / <code>E_AI_CONFIG</code> / <code>R_AI_NO_PROMPT</code></td><td>AI block problems</td></tr><tr><td><code>R_UNWRAP_NONE</code> / <code>R_UNWRAP_ERR</code></td><td>unwrap on <code>None</code> / <code>Err</code></td></tr><tr><td><code>R_CONTRACT_PRE</code> / <code>R_CONTRACT_POST</code></td><td>contract violation</td></tr><tr><td><code>R_TASK_FAILED</code> / <code>R_TASK_LEAK</code></td><td>task failure / <code>?</code> escaping a task</td></tr><tr><td><code>E_NOT_SEND</code></td><td>mutable/shared state captured across a <code>spawn</code> boundary</td></tr><tr><td><code>E_TASKLET_CONTEXT</code></td><td><code>spawn_async</code> outside the event loop (e.g. in a pool thread)</td></tr><tr><td><code>R_DEADLOCK</code></td><td>tasklets parked with no possible waker</td></tr><tr><td><code>R_CANCELLED</code></td><td>tasklet cancelled (e.g. nursery exit)</td></tr></tbody></table>
+<table><thead><tr><th>Code</th><th>Meaning</th></tr></thead><tbody><tr><td><code>E_NO_NULL</code></td><td><code>null</code>/<code>nil</code>/<code>undefined</code> used — use <code>Option[T]</code></td></tr><tr><td><code>E_TYPE_MISMATCH</code></td><td>types don&#x27;t unify; no implicit conversions</td></tr><tr><td><code>E_UNHANDLED_OPTION</code></td><td><code>Option[T]</code> used where <code>T</code> expected</td></tr><tr><td><code>E_EFFECT</code></td><td>effect context insufficient</td></tr><tr><td><code>E_ASYNC_BLOCKING</code></td><td>blocking IO directly in an <code>async fn</code> — wrap in <code>spawn</code></td></tr><tr><td><code>E_QUESTION</code></td><td><code>?</code> misused (incl. directly in <code>spawn</code> blocks)</td></tr><tr><td><code>E_ROUTE</code></td><td>bad route pattern (<code>/users/{id}</code> needs <code>{id: Int}</code>)</td></tr><tr><td><code>E_DB_SCHEMA</code></td><td>unknown table/column/operator (best effort, via <code>.nova-schema.json</code>)</td></tr><tr><td><code>E_CAPABILITY</code></td><td><code>effect io</code>/<code>net</code> fn missing its capability parameter; capabilities constructed or shadowed</td></tr><tr><td><code>E_IMMUTABLE</code></td><td>assignment to immutable binding/prop/let-field</td></tr><tr><td><code>E_INT_RANGE</code> / <code>R_INT_OVERFLOW</code></td><td>literal out of i64 range / arithmetic overflow</td></tr><tr><td><code>E_NON_EXHAUSTIVE</code></td><td><code>match</code> misses a variant</td></tr><tr><td><code>E_IMPORT</code> / <code>E_LOCK</code></td><td>module problems / lockfile mismatch</td></tr><tr><td><code>E_AI_SCHEMA</code> / <code>E_AI_CONFIG</code> / <code>R_AI_NO_PROMPT</code></td><td>AI block problems</td></tr><tr><td><code>R_UNWRAP_NONE</code> / <code>R_UNWRAP_ERR</code></td><td>unwrap on <code>None</code> / <code>Err</code></td></tr><tr><td><code>R_CONTRACT_PRE</code> / <code>R_CONTRACT_POST</code></td><td>contract violation</td></tr><tr><td><code>R_TASK_FAILED</code> / <code>R_TASK_LEAK</code></td><td>task failure / <code>?</code> escaping a task</td></tr><tr><td><code>E_NOT_SEND</code></td><td>mutable/shared state captured across a <code>spawn</code> boundary</td></tr><tr><td><code>E_TASKLET_CONTEXT</code></td><td><code>spawn_async</code> outside the event loop (e.g. in a pool thread)</td></tr><tr><td><code>R_DEADLOCK</code></td><td>tasklets parked with no possible waker</td></tr><tr><td><code>R_CANCELLED</code></td><td>tasklet cancelled (e.g. nursery exit)</td></tr></tbody></table>
 <h2>17. What Nova deliberately omits (v1)</h2>
 <p>No first-class functions, no operator overloading, no implicit conversions, no exceptions, no <code>try</code>/<code>catch</code>, no null, no eval, no macros, no inheritance of implementation beyond single <code>extends</code>, no method overloading, no global mutable state (module-level <code>var</code> is scoped to the module and discouraged).</p>
 <h2>18. NovaVM (v2 — built)</h2>
@@ -335,5 +393,7 @@ nova deploy [--target local|docker|aws|gcp] [--env NAME]</code></pre>
   <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
 </footer>
 <script src="../js/main.js"></script>
+<script src="../js/nova-live.js"></script>
+<script src="../js/runnable.js"></script>
 </body>
 </html>

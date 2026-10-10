@@ -225,6 +225,23 @@ effect fn run() {
 nova deploy --target local    # runs as a process; secrets resolve at runtime
 nova deploy --target docker   # docker build of the staged image</code></pre>
 <p>Full walkthrough: <a href="./deployment.html">deployment.md</a>.</p>
+<h2>(i) Naming conventions — 2 minutes</h2>
+<p>Nova takes its naming from the two languages it fuses: types look like Java, functions look like JavaScript. One rule per kind of name — no code-review debates.</p>
+<table><thead><tr><th>Name kind</th><th>Style</th><th>Example</th></tr></thead><tbody><tr><td>Classes, interfaces, enums, data classes</td><td>PascalCase</td><td><code>User</code>, <code>HttpRequest</code></td></tr><tr><td>Components</td><td>PascalCase</td><td><code>UserCard</code>, <code>Counter</code></td></tr><tr><td>Functions, methods</td><td>camelCase</td><td><code>getUser</code>, <code>calculateTotal</code></td></tr><tr><td>Variables, parameters</td><td>camelCase</td><td><code>userName</code>, <code>retryCount</code></td></tr><tr><td>Module-level constants</td><td>SCREAMING_SNAKE_CASE</td><td><code>MAX_RETRIES</code>, <code>DEFAULT_PORT</code></td></tr><tr><td>Type parameters</td><td>single capital letter</td><td><code>T</code>, <code>E</code>, <code>K</code>, <code>V</code></td></tr><tr><td>Module files</td><td>snake_case</td><td><code>helpers.nova</code> → <code>import helpers</code></td></tr><tr><td>Test files</td><td><code>*_test.nova</code></td><td><code>user_test.nova</code> (found by <code>nova test</code>)</td></tr></tbody></table>
+<pre><code class="language-nova">// ✅ Do
+class UserService { ... }
+component UserCard(user: User) { ... }
+fn getUser(id: Int) -&gt; Option[User] { ... }
+let retryCount = 0
+const MAX_RETRIES = 3
+
+// ❌ Don&#x27;t
+class userService { ... }      // types are PascalCase
+fn GetUser(id: Int) { ... }    // functions are camelCase
+let MAX = 3                    // screaming case is for constants only</code></pre>
+<p>Three special rules:</p>
+<p>1. <strong>Private is <code>_</code>-prefixed</strong> — <code>_helper</code>, <code>_CACHE</code> are module-private by    convention, like Python. 2. <strong>View tags are CamelCase</strong> — inside a component view, <code>&lt;UserCard&gt;</code>    works; <code>&lt;user-card&gt;</code> is a compile error. The parser enforces this one. 3. <strong>Acronyms stay readable</strong> — <code>HttpRequest</code>, not <code>HTTPRequest</code>;    <code>userId</code>, not <code>userID</code>. Treat an acronym like a word.</p>
+<p><code>nova fmt</code> fixes your whitespace, not your names — naming is a human (and code-review) job. The full normative list lives in SPEC §1.</p>
 <hr>
 <h2>Where next</h2>
 <ul>
@@ -245,5 +262,7 @@ nova deploy --target docker   # docker build of the staged image</code></pre>
   <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
 </footer>
 <script src="../js/main.js"></script>
+<script src="../js/nova-live.js"></script>
+<script src="../js/runnable.js"></script>
 </body>
 </html>
