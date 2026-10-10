@@ -85,4 +85,7 @@
   document.querySelectorAll("pre code.language-nova").forEach(function (el) {
     el.innerHTML = highlight(el.textContent);
   });
+
+  /* shared with runnable.js: the same Nova highlighter for live widgets */
+  window.NovaHighlight = highlight;
 })();
