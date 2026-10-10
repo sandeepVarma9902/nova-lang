@@ -1,0 +1,9 @@
+// ERROR: E_QUESTION
+effect fn f() -> Int {
+  let t = spawn { 1 }
+  return t.await()
+}
+fn g() -> Result[Int, String] {
+  let t = spawn { Ok(1)? }
+  return Ok(t.await())
+}

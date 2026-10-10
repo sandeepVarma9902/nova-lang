@@ -1,0 +1,45 @@
+// streams.nova — first-class pub/sub streams.
+//
+// A `stream` declaration binds a typed topic handle. Topics, consumer
+// groups and offsets behave like Kafka: each group tracks its own cursor,
+// so groups make independent progress over the same log. v1 runs on the
+// in-memory provider (local dev); the provider interface is swappable, so
+// a real Kafka provider drops in for v2 without changing this code.
+
+stream events: String
+
+effect fn handle(sub: Subscription[String], msg: Message[String],
+                 count: Int) -> Int {
+  print(msg.value)
+  match msg.key {
+    Some(k) => print("key=" + k),
+    None => print("(no key)")
+  }
+  sub.commit(msg)
+  return count + 1
+}
+
+effect fn drain(sub: Subscription[String], count: Int) -> Int {
+  return match sub.poll() {
+    None => count,
+    Some(msg) => drain(sub, handle(sub, msg, count))
+  }
+}
+
+effect fn main() {
+  let sub = events.subscribe(group: "workers")
+
+  events.publish("hello")
+  events.publish(key: "k1", value: "world")
+
+  print(drain(sub, 0))
+}
+
+main()
+
+// EXPECT:
+// hello
+// (no key)
+// world
+// key=k1
+// 2

@@ -1,0 +1,22 @@
+// ai.nova — first-class AI integration.
+//
+// An `ai fn`'s return TYPE is its output schema: the provider must return
+// structured data conforming to it. v1 runs against a deterministic mock
+// provider (NOVA_AI_PROVIDER=http selects the experimental HTTP hook).
+
+data class Summary(headline: String, score: Float)
+
+ai fn summarize(text: String) -> Summary
+  model = "nova-mock-1"
+  temperature = 0.3
+{
+  prompt("Summarize in one sentence: " + text)
+}
+
+let s = summarize("Nova is a programming language designed by AI, for AI.")
+print(s.headline)
+print(s.score)
+
+// EXPECT:
+// [mock] Summarize in one sentence: Nova is a programming
+// 0.5

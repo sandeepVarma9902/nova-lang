@@ -1,0 +1,5 @@
+// ERROR: E_EFFECT
+fn f() -> Int {
+  let t = spawn { 1 }
+  return t.await()
+}

@@ -1,0 +1,73 @@
+// todo.nova — lists, <for> rendering, and Option.
+//
+// `findItem` returns Option[String]: the type system forces every caller
+// to handle both cases with `match`. There is no null to forget.
+
+fn findItem(items: List[String], query: String) -> Option[String] {
+  for item in items {
+    if item == query {
+      return Some(item)
+    }
+  }
+  return None
+}
+
+component TodoApp() {
+  state items: List[String] = []
+
+  view {
+    <div>
+      <h1>Todos</h1>
+      <ul>
+        <for item in items>
+          <li>{item}</li>
+        </for>
+      </ul>
+      <button onClick={items.push("Buy milk")}>Add milk</button>
+    </div>
+  }
+}
+
+let app = render(TodoApp())
+app.fire("onClick")
+
+match findItem(["Buy milk", "Read book"], "Read book") {
+  Some(item) => print("Found: " + item),
+  None => print("Not on the list")
+}
+
+match findItem(["Buy milk"], "Gym") {
+  Some(item) => print("Found: " + item),
+  None => print("Not on the list")
+}
+
+// EXPECT:
+// <div>
+//   <h1>
+//     "Todos"
+//   </h1>
+//   <ul>
+//   </ul>
+//   <button onClick>
+//     "Add milk"
+//   </button>
+// </div>
+// --- html ---
+// <div><h1>Todos</h1><ul></ul><button>Add milk</button></div>
+// <div>
+//   <h1>
+//     "Todos"
+//   </h1>
+//   <ul>
+//     <li>
+//       "Buy milk"
+//     </li>
+//   </ul>
+//   <button onClick>
+//     "Add milk"
+//   </button>
+// </div>
+// --- html ---
+// <div><h1>Todos</h1><ul><li>Buy milk</li></ul><button>Add milk</button></div>
+// Found: Read book
+// Not on the list

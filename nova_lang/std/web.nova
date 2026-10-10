@@ -1,0 +1,47 @@
+// std/web.nova — Nova Boot sugar: response helpers.
+//
+// `import std.web` — resolves from the Nova standard library; a project
+// file named std/web.nova next to your code takes precedence if present.
+//
+// Route shorthands (get/post/put/delete/patch) are builtins, not defined
+// here, so the checker still validates each handler's signature:
+//   get(r, "/users/{id: Int}", showUser, io)
+
+fn ok(body: String) -> Response {
+  return response(200, body, "text/plain")
+}
+
+fn created(body: String) -> Response {
+  return response(201, body, "text/plain")
+}
+
+fn jsonOk(v: Json) -> Response {
+  return jsonResponse(200, v)
+}
+
+fn notFound(msg: String) -> Response {
+  return response(404, msg, "text/plain")
+}
+
+fn badRequest(msg: String) -> Response {
+  return response(400, msg, "text/plain")
+}
+
+fn serverError(msg: String) -> Response {
+  return response(500, msg, "text/plain")
+}
+
+fn jsonErr(status: Int, msg: String) -> Response {
+  return response(status, "{\"error\":" + toJson(msg) + "}",
+                  "application/json")
+}
+
+// needJson: parse the request body, or get a 400 Response as an Err.
+// Pairs with handlers returning Result[Response, Response]:
+//   let body = web.needJson(req)?
+fn needJson(req: Request) -> Result[Json, Response] {
+  return match reqJson(req) {
+    Ok(j) => Ok(j),
+    Err(e) => Err(jsonErr(400, e))
+  }
+}

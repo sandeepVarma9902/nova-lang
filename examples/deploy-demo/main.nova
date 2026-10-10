@@ -1,0 +1,28 @@
+// deploy-demo/main.nova — the manifest platform story in one program:
+// streams + secrets + spawn, deployed via `nova build` / `nova deploy`.
+
+stream events: String
+
+effect io fn readPassword(io: IO) -> String {
+  return match secret("db-password", io) {
+    Ok(pw) => "secret loaded",
+    Err(e) => "no secret: " + e
+  }
+}
+
+effect io fn main(io: IO) {
+  print(readPassword(io))
+  let sub = events.subscribe(group: "demo")
+  let t = spawn { "processed" }
+  events.publish("hello from " + t.await())
+  match sub.poll() {
+    None => print("(empty)"),
+    Some(m) => print(m.value)
+  }
+}
+
+main(io)
+
+// EXPECT (without NOVA_SECRET_DB_PASSWORD set):
+// no secret: secret not found: db-password
+// hello from processed

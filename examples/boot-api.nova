@@ -1,0 +1,184 @@
+// boot-api.nova — Nova Boot: a complete REST API in one file.
+//
+// This is Nova's answer to Spring Boot: router with typed path params,
+// JSON binding where Nova types are the schema, middleware, and
+// Result-to-HTTP error mapping. It REALLY serves HTTP (stdlib http.server).
+//
+// Run it:   NOVA_PORT=8080 ./nova run examples/boot-api.nova
+// Try it:   curl localhost:8080/posts
+//           curl -X POST "localhost:8080/posts?key=nova" \
+//             -d '{"title":"Hello","body":"Nova Boot works"}'
+//           curl localhost:8080/posts/1
+//           curl -X PUT "localhost:8080/posts/1?key=nova" -d '{"title":"Hi"}'
+//           curl -X DELETE "localhost:8080/posts/1?key=nova"
+//
+// NOTE: this example is excluded from tests/run_tests.py — it blocks
+// forever serving. See tests/test_boot.py for the automated HTTP tests.
+
+import std.web
+
+// -- model ------------------------------------------------------------
+data class Post(id: Int, title: String, body: String)
+
+// In-memory store. A real app would `nova db pull` its models and use
+// the query builder (see examples/db-demo.nova and showcase/blog).
+var posts: List[Post] = []
+var nextId: Int = 1
+
+fn findPost(id: Int) -> Option[Post] {
+  for p in posts {
+    if p.id == id {
+      return Some(p)
+    }
+  }
+  return None
+}
+
+// -- handlers ---------------------------------------------------------
+// Handlers are `effect fn (req: Request) -> Result[Response, Response]`:
+// Ok serves the response; Err(response) serves THAT response (a 400, a
+// 404...). A bare Response also works. `?` unwraps Results mid-handler.
+
+// GET /posts -> [Post]
+effect fn listPosts(req: Request) -> Result[Response, Response] {
+  return Ok(jsonResponse(200, posts))
+}
+
+// POST /posts {"title": _, "body": _} -> 201 Post
+effect fn createPost(req: Request) -> Result[Response, Response] {
+  // web.needJson: invalid JSON becomes Err(400) — via `?`, not a crash.
+  let body = web.needJson(req)?
+  // Nova types ARE the schema: every field is extracted and validated,
+  // and validation failures are structured 400s.
+  let title = match jsonGet(body, "title") {
+    Some(v) => match jsonStr(v) {
+      Some(t) => Ok(t),
+      None => Err(web.jsonErr(400, "field 'title' must be a string"))
+    },
+    None => Err(web.jsonErr(400, "missing field 'title'"))
+  }?
+  let pbody = match jsonGet(body, "body") {
+    Some(v) => match jsonStr(v) {
+      Some(t) => t,
+      None => ""
+    },
+    None => ""
+  }
+  let post = Post(id: nextId, title: title, body: pbody)
+  nextId = nextId + 1
+  posts.push(post)
+  return Ok(jsonResponse(201, post))
+}
+
+// GET /posts/{id: Int} -> Post
+// The router converts {id: Int} and 400s on "/posts/abc" automatically;
+// paramInt unwraps the already-typed value.
+effect fn getPost(req: Request) -> Result[Response, Response] {
+  let id = match paramInt(req, "id") {
+    Some(i) => Ok(i),
+    None => Err(web.jsonErr(400, "missing id"))
+  }?
+  return match findPost(id) {
+    Some(p) => Ok(jsonResponse(200, p)),
+    None => Err(web.jsonErr(404, "no post " + str(id)))
+  }
+}
+
+// PUT /posts/{id: Int} {"title": _} -> Post
+effect fn updatePost(req: Request) -> Result[Response, Response] {
+  let id = match paramInt(req, "id") {
+    Some(i) => Ok(i),
+    None => Err(web.jsonErr(400, "missing id"))
+  }?
+  let cur = match findPost(id) {
+    Some(p) => Ok(p),
+    None => Err(web.jsonErr(404, "no post " + str(id)))
+  }?
+  let body = web.needJson(req)?
+  let title = match jsonGet(body, "title") {
+    Some(v) => match jsonStr(v) {
+      Some(t) => t,
+      None => cur.title
+    },
+    None => cur.title
+  }
+  let updated = Post(id: id, title: title, body: cur.body)
+  let rebuilt: List[Post] = []
+  for p in posts {
+    if p.id == id {
+      rebuilt.push(updated)
+    } else {
+      rebuilt.push(p)
+    }
+  }
+  posts = rebuilt
+  return Ok(jsonResponse(200, updated))
+}
+
+// DELETE /posts/{id: Int} -> 200
+effect fn deletePost(req: Request) -> Result[Response, Response] {
+  let id = match paramInt(req, "id") {
+    Some(i) => Ok(i),
+    None => Err(web.jsonErr(400, "missing id"))
+  }?
+  let kept: List[Post] = []
+  var found = false
+  for p in posts {
+    if p.id == id {
+      found = true
+    } else {
+      kept.push(p)
+    }
+  }
+  if not found {
+    return Err(web.jsonErr(404, "no post " + str(id)))
+  }
+  posts = kept
+  return Ok(web.ok("deleted"))
+}
+
+// -- middleware --------------------------------------------------------
+// Middleware is `effect fn (req: Request) -> Option[Response]`:
+// Some(response) short-circuits, None continues to the routes.
+
+effect fn requireAuth(req: Request) -> Option[Response] {
+  // Demo auth: writes need ?key=nova. Real apps check a header against
+  // the secret store.
+  if reqMethod(req) == "GET" {
+    return None
+  }
+  return match query(req, "key") {
+    Some(k) => if k == "nova" { None } else {
+      Some(web.jsonErr(401, "bad key"))
+    },
+    None => Some(web.jsonErr(401, "missing ?key="))
+  }
+}
+
+// -- boot --------------------------------------------------------------
+
+effect io fn boot(cap: IO) {
+  let r = router()
+  use(r, requireAuth)
+  get(r, "/posts", listPosts, cap)
+  post(r, "/posts", createPost, cap)
+  get(r, "/posts/{id: Int}", getPost, cap)
+  put(r, "/posts/{id: Int}", updatePost, cap)
+  delete(r, "/posts/{id: Int}", deletePost, cap)
+
+  let port = match env("NOVA_PORT") {
+    Some(p) => match parseInt(p) {
+      Some(n) => n,
+      None => 8080
+    },
+    None => 8080
+  }
+  // serve() blocks forever; Result Err (e.g. port in use) is the only
+  // way it returns.
+  match serve(r, port, cap) {
+    Ok(_) => print("stopped"),
+    Err(e) => print("serve failed: " + e)
+  }
+}
+
+boot(io)

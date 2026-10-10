@@ -1,0 +1,16 @@
+// nova_helpers.nova — helper module for modules.nova.
+//
+// Imported, never run directly. Names starting with `_` are private to
+// the module and cannot be touched from outside.
+
+fn greet(name: String) -> String {
+  return "Hello, " + name + "!"
+}
+
+fn add(a: Int, b: Int) -> Int {
+  return a + b
+}
+
+fn _secret() -> String {
+  return "you cannot see me"
+}

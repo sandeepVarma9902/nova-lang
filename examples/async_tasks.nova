@@ -1,0 +1,25 @@
+// async_tasks.nova — the v2 event loop: spawn_async tasklets genuinely
+// suspend on sleep() and resume, interleaving on one scheduler thread.
+// "fast" finishes before "slow" even though it was spawned second,
+// proving cooperative suspend/resume (not run-to-completion).
+//
+// EXPECT:
+// fast
+// slow
+// done
+
+effect fn main() {
+  let slow = spawn_async {
+    sleep(0.3)
+    print("slow")
+  }
+  let fast = spawn_async {
+    sleep(0.1)
+    print("fast")
+  }
+  slow.await()
+  fast.await()
+  print("done")
+}
+
+main()

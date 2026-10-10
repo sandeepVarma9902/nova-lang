@@ -1,0 +1,6 @@
+// ERROR: E_RETURN
+effect fn main() {
+  let t = spawn { return 42 }
+  print(t.await())
+}
+main()

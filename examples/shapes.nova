@@ -1,0 +1,62 @@
+// shapes.nova — classes, interfaces, inheritance, data classes.
+//
+// Java's good parts (nominal types, encapsulation, polymorphism) without
+// the boilerplate: `data class` gives you fields, init, == and repr.
+
+interface Shape {
+  fn area() -> Float
+  fn describe() -> String
+}
+
+class Circle implements Shape {
+  let radius: Float
+
+  init(radius: Float) {
+    this.radius = radius
+  }
+
+  override fn area() -> Float {
+    return 3.14159 * this.radius * this.radius
+  }
+
+  override fn describe() -> String {
+    return "Circle(radius=" + str(this.radius) + ")"
+  }
+}
+
+class ColoredCircle extends Circle {
+  let color: String
+
+  init(radius: Float, color: String) {
+    super(radius)
+    this.color = color
+  }
+
+  override fn describe() -> String {
+    return "ColoredCircle(" + this.color + ", radius=" + str(this.radius) + ")"
+  }
+}
+
+data class Point(x: Float, y: Float)
+
+fn describeArea(s: Shape) -> String {
+  return s.describe() + " area=" + str(s.area())
+}
+
+let c = Circle(radius: 2.0)
+print(describeArea(c))
+
+let cc = ColoredCircle(radius: 1.0, color: "red")
+print(describeArea(cc))
+
+let p = Point(x: 1.0, y: 2.0)
+print(p)
+print(p == Point(x: 1.0, y: 2.0))
+print(p == Point(x: 9.0, y: 9.0))
+
+// EXPECT:
+// Circle(radius=2.0) area=12.56636
+// ColoredCircle(red, radius=1.0) area=3.14159
+// Point(x: 1.0, y: 2.0)
+// true
+// false

@@ -1,0 +1,15 @@
+// modules.nova — explicit imports, no classpath hell.
+//
+// `import nova_helpers` loads nova_helpers.nova from the same directory.
+// Only public names (not starting with `_`) are visible, under the
+// module's own namespace. Imported modules never receive ambient
+// capabilities — they must take them as parameters.
+
+import nova_helpers
+
+print(nova_helpers.greet("Ada"))
+print(nova_helpers.add(2, 3))
+
+// EXPECT:
+// Hello, Ada!
+// 5

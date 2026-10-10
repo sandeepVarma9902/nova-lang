@@ -1,0 +1,10 @@
+// ERROR: E_NOT_SEND
+// Mutable state shared across a spawn boundary is rejected at check
+// time — assigning to a captured `var` from another thread would race.
+effect fn main() {
+  var total = 0
+  spawn {
+    total = total + 1
+  }
+}
+main()

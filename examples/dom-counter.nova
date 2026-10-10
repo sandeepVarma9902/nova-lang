@@ -1,0 +1,41 @@
+// dom-counter.nova — Nova v2 DOM renderer demo.
+//
+// Same component semantics as counter.nova, but this file is compiled by
+// `render_dom.render_to_html` into examples/dom-counter.html: real DOM,
+// real click handlers, full subtree re-render on every state change.
+//
+// `nova run` still prints the console tree (below); the HTML build is what
+// you double-click in a browser.
+
+component Counter(title: String) {
+  state count: Int = 0
+
+  view {
+    <div>
+      <h1>{title}</h1>
+      <p>{count}</p>
+      <button onClick={count = count + 1}>Increment</button>
+      <button onClick={count = count - 1}>Decrement</button>
+    </div>
+  }
+}
+
+render(Counter(title: "Clicks"))
+
+// EXPECT:
+// <div>
+//   <h1>
+//     "Clicks"
+//   </h1>
+//   <p>
+//     "0"
+//   </p>
+//   <button onClick>
+//     "Increment"
+//   </button>
+//   <button onClick>
+//     "Decrement"
+//   </button>
+// </div>
+// --- html ---
+// <div><h1>Clicks</h1><p>0</p><button>Increment</button><button>Decrement</button></div>

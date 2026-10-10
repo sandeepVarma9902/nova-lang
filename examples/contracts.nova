@@ -1,0 +1,29 @@
+// contracts.nova — requires/ensures: executable API documentation.
+//
+// The contract is part of the signature. Violations fail fast at runtime
+// with a structured diagnostic instead of corrupting state silently.
+
+fn divide(a: Int, b: Int) -> Int
+  requires b != 0
+  ensures result * b == a
+{
+  return a / b
+}
+
+fn sqrtApprox(x: Float) -> Float
+  requires x >= 0.0
+  ensures result >= 0.0
+{
+  // one Newton step from a rough guess — good enough for the demo
+  let guess = x / 2.0 + 0.5
+  return guess - (guess * guess - x) / (2.0 * guess)
+}
+
+print(divide(20, 4))
+print(divide(-20, -4))
+print(sqrtApprox(16.0))
+
+// EXPECT:
+// 5
+// 5
+// 5.1911764705882355

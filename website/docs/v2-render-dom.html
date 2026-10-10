@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browser Renderer — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1>Nova v2 — Browser DOM renderer (<code>render_dom</code>)</h1>
+<p>Item 5 of the v2 roadmap. v1&#x27;s <code>render()</code> printed a console tree; <code>nova_lang/render_dom.py</code> compiles Nova components to a <strong>single self-contained <code>.html</code> file</strong> with the JS runtime embedded — no CDN, no network, works by double-clicking the file.</p>
+<p>Public API (CLI wiring target — <code>cli.py</code> deliberately untouched):</p>
+<pre><code class="language-python">from nova_lang.render_dom import render_to_html, NovaRenderError
+render_to_html(&quot;examples/dom-counter.nova&quot;, &quot;examples/dom-counter.html&quot;)
+# -&gt; returns the out_path; raises NovaRenderError on unsupported constructs</code></pre>
+<h2>How it works</h2>
+<p>1. <strong>Type-check first.</strong> The source goes through the normal checker    (<code>check_source</code>), so type errors surface before any codegen. 2. <strong>Parse.</strong> Components are <code>ComponentDecl</code>s; mounts are top-level    <code>render(Counter(title: &quot;Clicks&quot;))</code> calls (bare or <code>let</code>-bound). Props must    be named and literal. 3. <strong>Codegen per component:</strong></p>
+<ul>
+<li><code>state n: Int = 0</code> → <code>function Counter_initState() { return { count: 0 }; }</code></li>
+<li><code>view { ... }</code> → <code>function Counter_view(state, props, rerender)</code> that</li>
+</ul>
+<p>     builds real DOM with <code>document.createElement</code> / <code>createTextNode</code> and      wires handlers with <code>addEventListener</code>.</p>
+<ul>
+<li>bare names in expressions resolve in order: **state field → param →</li>
+</ul>
+<p>     loop variable<strong>. Unknown names are a compile error with line/col. 4. </strong>Mount.<strong> <code>__novaMount(rootEl, {initState, props, view})</code> renders once.    Every event handler mutates <code>state</code>, then calls <code>rerender()</code>, which    </strong>rebuilds the whole component subtree<strong> (<code>while (rootEl.firstChild)    rootEl.removeChild(rootEl.firstChild); rootEl.appendChild(view(...))</code>).    Simple, correct; listeners are re-attached on every rebuild. 5. </strong>Assemble.** Runtime + component functions + mounts go in one <code>&lt;script&gt;</code>    inside one <code>&lt;html&gt;</code> with one <code>&lt;div id=&quot;nova-app-N&quot;&gt;</code> per mount.</p>
+<h2>Supported subset (exact)</h2>
+<ul>
+<li><code>state</code> fields: <code>Int</code>, <code>Float</code>, <code>String</code>, <code>Bool</code>, and <code>List[...]</code> of those —</li>
+</ul>
+<p>  initialized from <strong>literal</strong> expressions (no variable refs in initializers).</p>
+<ul>
+<li>Component params, supplied via <code>render(...)</code> named args.</li>
+<li><code>view</code> blocks: lowercase element tags, <code>JText</code>, <code>{expr}</code> interpolation,</li>
+</ul>
+<p>  string attrs (<code>class=&quot;...&quot;</code>), expression attrs (<code>title={...}</code> → <code>String(...)</code>   via <code>setAttribute</code>), bare boolean attrs, <code>on&lt;Event&gt;={expr}</code> (e.g. <code>onClick</code>   → <code>click</code>) with <strong>inline handler expressions</strong>.</p>
+<ul>
+<li>Handler bodies: assignment to state fields (<code>count = count + 1</code>),</li>
+</ul>
+<p>  <code>.push(...)</code> on state lists, and any supported expression — the compiled   statement runs, then the subtree re-renders.</p>
+<ul>
+<li>Expressions: literals, arithmetic <code>+ - * / %</code>, comparisons</li>
+</ul>
+<p>  <code>== != &lt; &lt;= &gt; &gt;=</code> (note: <code>==</code> compiles to JS <code>===</code>), <code>and</code>/<code>or</code>/<code>not</code>,   unary <code>-</code>, string concatenation via <code>+</code>, <code>this.x</code> state access, field/index   access, single-expression <code>if/else</code> branches (compiled to ternaries),   <code>&lt;for item in items&gt;</code> over a state/param list.</p>
+<ul>
+<li>Top-level statements other than component declarations and <code>render(...)</code></li>
+</ul>
+<p>  mounts are <strong>ignored</strong> (console-render artifacts like <code>app.fire(...)</code>).   This is by design, not an accident — the DOM bundle mounts components;   it does not replay the console REPL session.</p>
+<h2>Honest limits</h2>
+<ul>
+<li><strong>No component methods.</strong> The v1 parser does not accept <code>fn</code> inside a</li>
+</ul>
+<p>  component body — handlers are inline expressions by design. (The roadmap   sketch that mentioned <code>fn increment()</code> / <code>this.count</code> described syntax the   language never shipped; this renderer compiles the language as it exists.)</p>
+<ul>
+<li><strong>No nested components</strong> (<code>&lt;Counter&gt;</code> inside a view) — rejected at compile</li>
+</ul>
+<p>  time. Nested views must be flattened for now.</p>
+<ul>
+<li><strong>No CSS beyond plain attributes.</strong> There is no <code>&lt;style&gt;</code> block support;</li>
+</ul>
+<p>  use <code>class=&quot;...&quot;</code> + an external stylesheet by hand if you need styling.</p>
+<ul>
+<li><strong>Full-subtree re-render</strong> on every state change — no diffing, no keyed</li>
+</ul>
+<p>  lists. Fine for v1-scale examples.</p>
+<ul>
+<li>Only the first mount target per <code>render(...)</code> call; multiple <code>render(...)</code></li>
+</ul>
+<p>  calls each get their own container div.</p>
+<ul>
+<li>Unsupported constructs raise <code>NovaRenderError</code> with a message and the</li>
+</ul>
+<p>  source line/col — never silently dropped.</p>
+<h2>Viewing the example</h2>
+<pre><code>python3 -c &quot;from nova_lang.render_dom import render_to_html; \
+            render_to_html(&#x27;examples/dom-counter.nova&#x27;, &#x27;examples/dom-counter.html&#x27;)&quot;</code></pre>
+<p>then open <code>examples/dom-counter.html</code> in a browser (double-click works — zero network). Click Increment/Decrement and watch the count update.</p>
+<p>The checked-in <code>examples/dom-counter.html</code> was generated exactly this way.</p>
+<h2>Verification</h2>
+<ul>
+<li><code>python3 tests/test_render_dom.py</code> — asserts the bundle is self-contained</li>
+</ul>
+<p>  (no external URLs), embeds the runtime, the component state (<code>count: 0</code>),   props (<code>title: &quot;Clicks&quot;</code>), and both click wirings; asserts   <code>NovaRenderError</code> on bad inputs; runs <code>node --check</code> on the embedded JS and   executes the bundle in node against a minimal DOM shim, firing the click   listeners and asserting the rendered text goes <code>0 → 2 → 1</code> and the old   subtree is fully detached after re-render.</p>
+<ul>
+<li><code>python3 tests/run_tests.py</code> — the v1 suite stays green (the new</li>
+</ul>
+<p>  <code>examples/dom-counter.nova</code> carries a <code>// EXPECT:</code> block for the console   tree, so <code>nova run</code> and <code>render_dom</code> agree on semantics).</p>
+<ul>
+<li><code>examples/todo.nova</code> (with <code>&lt;for item in items&gt;</code> + <code>items.push(...)</code>)</li>
+</ul>
+<p>  also compiles and passes a headless click test — the loop path is real.</p>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>

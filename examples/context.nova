@@ -1,0 +1,26 @@
+// context.nova — typed context: React-style dependency injection without
+// prop drilling. `context` declares a typed slot with a default; `provide`
+// pushes a value for a block; `consume` reads the nearest provider (or
+// the default). Type-checked at check time; spawn_async tasklets inherit
+// the spawner's context.
+//
+// EXPECT:
+// dark
+// dark
+// light
+
+context theme: String = "light"
+
+effect fn show() {
+  print(consume theme)
+}
+
+effect fn main() {
+  provide theme = "dark" {
+    show()
+    print(consume theme)
+  }
+  show()
+}
+
+main()

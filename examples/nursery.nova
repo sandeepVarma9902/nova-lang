@@ -1,0 +1,25 @@
+// nursery.nova — structured concurrency: every task spawned inside a
+// nursery { } block is joined before the block exits, on ALL exits.
+// Task B sleeps less so it finishes first; the nursery still waits for
+// both before printing "nursery done".
+//
+// EXPECT:
+// task-b
+// task-a
+// nursery done
+
+effect fn main() {
+  nursery {
+    spawn_async {
+      sleep(0.2)
+      print("task-a")
+    }
+    spawn_async {
+      sleep(0.1)
+      print("task-b")
+    }
+  }
+  print("nursery done")
+}
+
+main()

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAQ — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1>Nova FAQ — for the skeptical React/Java developer</h1>
+<h2>1. Why no null?</h2>
+<p>Null is a billion-dollar mistake: it&#x27;s the absence of a value hiding behind a type that <em>claims</em> to have one, so every dereference is a gamble. Nova makes absence explicit — <code>Option[T]</code> = <code>Some(v)</code> | <code>None</code> — and the compiler refuses to let you use it without handling both cases (<code>E_UNHANDLED_OPTION</code>). The JS pattern <code>value?.nested?.field ?? &quot;default&quot;</code> becomes a <code>match</code> the compiler checks for exhaustiveness. You trade one line of <code>?.</code> for never shipping a <code>TypeError: Cannot read properties of undefined</code>.</p>
+<h2>2. Why no exceptions?</h2>
+<p>Exceptions create invisible control flow — <code>fetchUser(7)</code> can return from anywhere, caught (or not) frames away. Nova&#x27;s <code>Result[T, E]</code> keeps failure in the type signature: a function that can fail <em>says so</em>. <code>?</code> gives you the flat happy path of <code>try/catch</code> without the hidden jumps, and <code>match</code> is your explicit catch block. What Java does with checked exceptions Nova does with <code>Result</code> + <code>?</code> — minus the <code>throws</code> ceremony.</p>
+<h2>3. Why no <code>async</code>/<code>await</code> like JS?</h2>
+<p>JS&#x27;s <code>async/await</code> is syntactic sugar over Promises with no opinion about <em>what</em> runs where. Nova splits the two workloads and enforces the split: <code>spawn { }</code> runs a block on a worker thread (CPU-bound → parallel), <code>async fn</code> marks a function that may <code>await</code> (IO-bound → coordinate). Calling blocking IO directly inside an <code>async fn</code> is a compile error (<code>E_ASYNC_BLOCKING</code>), not a slow Tuesday. There&#x27;s no <code>Promise</code> type — a <code>Task[T]</code> is a structured, join-guaranteed computation, and <code>task.await()</code> blocks the caller explicitly. The mental model: <code>async</code> marks <em>await-capability</em>, not a caller barrier — any effect context can call an <code>async fn</code>, and <code>async</code> composes with <code>io</code>/<code>net</code> (<code>async effect net fn</code>) so offloaded IO stays expressible. Note the v1 honesty clause: <code>async</code> currently runs on the calling thread and <code>await</code> blocks it — the <em>discipline</em> is fully enforced by the compiler, while the true non-blocking event-loop scheduler arrives with NovaVM in v2 (SPEC §6).</p>
+<h2>4. Is the interpreter slow?</h2>
+<p>v1 is a tree-walking interpreter — the <em>reference semantics</em>, not the performance story. The production story is <strong>NovaVM</strong>: a small, portable bytecode VM the v2 compiler targets (SPEC §18). Think of v1 like TypeScript&#x27;s <code>tsc --noEmit</code> + <code>ts-node</code> phase: correctness and tooling first, codegen second. For today&#x27;s workloads, <code>threading = &quot;multi&quot;</code> parallelizes CPU-bound work on a worker pool; the interpreter is not the bottleneck for IO-bound code, which is most code. Concretely: if your program spends its time waiting on network/AI/streaming, you won&#x27;t feel the interpreter. If you&#x27;re doing heavy number-crunching in Nova itself, that&#x27;s what <code>spawn</code> + NovaVM are for.</p>
+<h2>5. How do I do <code>useState</code>?</h2>
+<p><code>state count: Int = 0</code> inside a component. No hook call, no rules-of-hooks, order-independent, compiler-managed. State annotations are required (the compiler can&#x27;t infer from nothing), updates are assignments, and firing an event re-renders.</p>
+<h2>6. How do I do <code>useEffect</code>?</h2>
+<p>You don&#x27;t have implicit render-side-effects. Side effects live in explicit <code>effect fn</code>s, and component event handlers run with full effects and re-render afterwards. Lifecycle hooks are a v2 conversation; v1 wants effects called deliberately, not as render fallout.</p>
+<h2>7. How do I avoid prop drilling?</h2>
+<p>v1: pass props explicitly (they&#x27;re type-checked, immutable). Typed context is a v2 item (ROADMAP.md) — the SPEC flags it explicitly in §8, so don&#x27;t build your own context hack; wait for the typed one.</p>
+<h2>8. How do I do <code>fetch().then(...)</code>?</h2>
+<pre><code class="language-nova">effect net fn load(url: String, net: Net) -&gt; Result[String, String] {
+  return fetch(url, net)
+}
+effect net fn run(net: Net) -&gt; Result[String, String] {
+  let body = load(&quot;https://api.example.com&quot;, net)?  // Err propagates
+  return Ok(body)
+}</code></pre>
+<p>The <code>net</code> capability arrives as a parameter (never ambient). From <code>async</code> code, spawn-wrap it: <code>let t = spawn { fetch(url, net).unwrap() }; t.await()</code> — otherwise <code>E_ASYNC_BLOCKING</code>.</p>
+<h2>9. What replaces Java&#x27;s checked exceptions?</h2>
+<p><code>Result[T, E]</code> + <code>?</code>. Where Java writes <code>throws IOException</code>, Nova writes <code>-&gt; Result[String, String]</code>. Where Java writes <code>catch</code>, Nova writes <code>match</code>. The exhaustiveness check replaces the compiler&#x27;s &quot;unhandled exception&quot; error — with less paperwork.</p>
+<h2>10. What replaces <code>Optional&lt;T&gt;</code>?</h2>
+<p><code>Option[T]</code>. Same shape, deeper enforcement: Java lets you call <code>get()</code> and blow up at runtime; Nova&#x27;s <code>.unwrap()</code> fails fast (<code>R_UNWRAP_NONE</code>) and the compiler pushes you toward <code>match</code> or <code>?</code> instead. <code>Optional.map</code> chains become <code>match</code> arms — more verbose, but every branch is visible.</p>
+<h2>11. What replaces the classpath / Maven?</h2>
+<p>Explicit <code>import module_name</code> (file-based, namespaced) plus <code>nova lock</code>, which pins every transitive import by sha256 into <code>nova.lock</code>. <code>nova run --locked</code> refuses tampered modules. No dependency resolution algorithm, no version ranges — v1 is deliberately small; a package registry is a v2 question.</p>
+<h2>12. What&#x27;s the threading model?</h2>
+<p>Default: <strong>single-threaded event loop</strong> (the React/JS mental model — no data races, no locks in your code). Opt-in: <code>spawn { }</code> for worker-thread parallelism. <code>threading = &quot;single&quot;</code> in app.nova makes <code>spawn</code> run inline and deterministic — your tests&#x27; best friend (the test suite itself runs with <code>NOVA_THREADING=single</code>). <code>multi</code>/<code>auto</code> use a worker pool sized to CPU count. Tasks are structured: children complete before their parent, everything is joined before exit. Two rules the compiler enforces so you can&#x27;t misuse this: spawning needs an effect context (starting a thread <em>is</em> an effect), and the spawn block never gains new capabilities beyond the spawner&#x27;s — capabilities can&#x27;t leak across the thread boundary.</p>
+<h2>13. Can I use npm packages?</h2>
+<p>No — v1. Nova has no JS interop and no package registry yet. The stdlib-only repo keeps the supply chain tiny and auditable (SPEC §13). If you need a capability that doesn&#x27;t exist, that&#x27;s a v2/roadmap conversation, not a <code>require()</code> hack.</p>
+<h2>14. How much do AI calls cost? Are they deterministic?</h2>
+<p>v1 runs against a <strong>deterministic mock provider</strong> — zero cost, zero network, reproducible output. Cost only enters with <code>NOVA_AI_PROVIDER=http</code> (experimental), where your own key and base URL apply and cost is whatever your provider charges. Determinism in production is your provider&#x27;s contract to honor; Nova&#x27;s contract is the <em>schema</em> — the return type is the output schema and JSON coercion is automatic. Practical advice: develop and test against the mock (it&#x27;s deterministic, so tests are stable), and treat the HTTP hook as integration-testing territory, not a v1 deployment path.</p>
+<h2>15. Why no operator overloading?</h2>
+<p>Because <code>a + b</code> should mean exactly one thing everywhere. Overloading turns reading code into archaeology — Nova is AI-native, and both humans and models read code faster when operators are fixed. Need custom behavior? Name a function.</p>
+<h2>16. Why is assignment an expression?</h2>
+<p>So event handlers stay trivial: <code>onClick={count = count + 1}</code> is just an expression the handler runs — no <code>setState</code> wrapper, no callback form. It also means <code>let x = (y = 5)</code> works, though you should rarely write it. The one caution: <code>if x = 5</code> <em>assigns</em> and tests the result — comparison is always <code>==</code>.</p>
+<h2>17. What happens on integer overflow?</h2>
+<p>It&#x27;s a runtime error — <code>R_INT_OVERFLOW</code> — never silent wraparound, and literals outside i64 range are rejected at compile time (<code>E_INT_RANGE</code>). Checked arithmetic is a security feature (SPEC §13), not a performance choice. If you need wrapping or big integers, that&#x27;s explicit API, not default behavior.</p>
+<h2>18. How do errors surface to AI agents?</h2>
+<p>Every diagnostic — compile or runtime — is structured JSON: <code>{&quot;code&quot;, &quot;message&quot;, &quot;line&quot;, &quot;col&quot;, &quot;hint?&quot;}</code> with a <em>stable</em> code (<code>E_NO_NULL</code>, <code>R_TASK_FAILED</code>, …). <code>nova check</code> prints diagnostics as JSON on stdout. No regex-parsing log lines: an agent can pattern-match on the code and follow the hint. This is a deliberate design pillar (§13.5).</p>
+<h2>19. What happens on an un-awaited task failure?</h2>
+<p>Nothing silent. Tasks are structured: every outstanding task is joined before the program exits, and an un-awaited task failure surfaces <strong>at join time</strong> (<code>R_TASK_FAILED</code>), never swallowed. There is no fire-and-forget that can lose an error — that&#x27;s the point of structured concurrency. Compare with JS, where an unhandled promise rejection may log a warning and vanish: in Nova the program&#x27;s exit join is the backstop, and it fails loudly. If you need &quot;I genuinely don&#x27;t care about the result,&quot; you still have to <code>await</code> it and <code>match</code> away the outcome explicitly — the language makes you sign for it.</p>
+<h2>20. Where does <code>?</code> <em>not</em> work?</h2>
+<p>Directly inside a <code>spawn { }</code> block (<code>E_QUESTION</code>) — it would escape the task boundary, and the task boundary is where structured concurrency draws its line. Handle <code>Result</code>/<code>Option</code> with <code>match</code> inside the block, then return the handled value. <code>?</code> also requires the enclosing function to return a matching <code>Result</code>/<code>Option</code>; the compiler tells you when it doesn&#x27;t.</p>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>

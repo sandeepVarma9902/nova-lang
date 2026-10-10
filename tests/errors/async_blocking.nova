@@ -1,0 +1,4 @@
+// ERROR: E_ASYNC_BLOCKING
+async effect net fn f(url: String, net: Net) -> String {
+  return fetch(url, net).unwrap()
+}

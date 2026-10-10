@@ -1,0 +1,29 @@
+// hello.nova — the basics: typed declarations, inference, pure functions.
+//
+// Nova is statically typed, but you rarely write the types: `let` infers
+// them. Functions are pure by default — no effects unless you say so.
+
+let greeting: String = "Hello"
+let target = "Nova"          // inferred: String
+let year: Int = 2026
+let pi = 3.14159             // inferred: Float
+let ready = true             // inferred: Bool
+
+fn greet(name: String) -> String {
+  return greeting + ", " + name + "!"
+}
+
+fn add(a: Int, b: Int) -> Int {
+  return a + b
+}
+
+print(greet(target))
+print(year)
+print(add(20, 22))
+print("pi is " + str(pi) + ", ready: " + str(ready))
+
+// EXPECT:
+// Hello, Nova!
+// 2026
+// 42
+// pi is 3.14159, ready: true

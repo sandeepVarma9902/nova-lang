@@ -1,0 +1,47 @@
+// concurrency.nova — structured concurrency.
+//
+// Nova's default model is single-threaded (the React/JS mental model:
+// no data races, ever). Two opt-in tools cover the rest:
+//
+//   CPU-bound -> parallel: spawn { } runs a block on a worker thread and
+//     hands back a Task[T]; task.await() collects the result.
+//   IO-bound  -> async:    async fns coordinate tasks with await. The
+//     compiler enforces the discipline — blocking IO directly inside an
+//     async fn is E_ASYNC_BLOCKING; wrap it in spawn { }.
+//
+// Rule of thumb the compiler teaches you: IO-bound -> async,
+// CPU-bound -> parallel. (Set threading = "single" in app.nova for a
+// fully deterministic, inline run.)
+
+fn fib(n: Int) -> Int {
+  if n < 2 { return n }
+  return fib(n - 1) + fib(n - 2)
+}
+
+// CPU-bound -> parallel.
+effect fn parallelFib() -> Int {
+  let a = spawn { fib(20) }
+  let b = spawn { fib(21) }
+  return a.await() + b.await()
+}
+
+// IO-bound -> async: coordinate spawned work with await.
+async fn doubleAll(xs: List[Int]) -> List[Int] {
+  let out: List[Int] = []
+  for x in xs {
+    let t = spawn { x * 2 }
+    out.push(t.await())
+  }
+  return out
+}
+
+effect fn main() {
+  print(parallelFib())
+  print(doubleAll([1, 2, 3]))
+}
+
+main()
+
+// EXPECT:
+// 17711
+// [2, 4, 6]

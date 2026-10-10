@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Language Specification — Nova</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav">
+    <a class="brand" href="../index.html"><span class="brand-mark">&#10022;</span> Nova</a>
+    <button class="nav-toggle" aria-label="Menu">&#9776;</button>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../tour.html">Tour</a>
+      <a href="../snippets.html">Snippets</a>
+      <a href="../playground.html">Playground</a>
+      <a href="../docs.html" class="active">Docs</a>
+      <a href="../download.html" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+<main class="doc-page">
+  <aside class="doc-toc">
+    <h4>Documentation</h4>
+        <a href="overview.html">Overview</a>
+    <a href="tutorial.html">Tutorial — Learn Nova in 30 minutes</a>
+    <a href="faq.html">FAQ</a>
+    <a href="migration-guide.html">Migration Guide</a>
+    <a href="deployment.html">Deployment</a>
+    <a href="spec.html">Language Specification</a>
+    <a href="v2-bytecode.html">NovaVM Bytecode</a>
+    <a href="v2-deploy-cloud.html">Cloud Deployment</a>
+    <a href="v2-eval.html">nova eval Harness</a>
+    <a href="v2-kafka.html">Kafka Streams Provider</a>
+    <a href="v2-lsp.html">Language Server</a>
+    <a href="v2-migrate.html">nova migrate</a>
+    <a href="v2-render-dom.html">Browser Renderer</a>
+  </aside>
+  <article class="doc-body">
+<h1>Nova Language Specification — v1</h1>
+<p>Nova is an AI-native programming language: a hybrid of Java and React, authored by AI, for AI. Static typing with inference, classes and interfaces, components with type-checked JSX-like views, explicit effects, no null, structured concurrency, first-class AI calls, and a platform layer (streams, manifest, deploy) around a small language core.</p>
+<p>v1 runs on a tree-walking interpreter (<code>nova</code>). The portable bytecode story (NovaVM) is specified in §18; v2 compiles to it.</p>
+<hr>
+<h2>1. Lexical structure</h2>
+<ul>
+<li>Significant newlines: a newline ends a statement, except inside</li>
+</ul>
+<p>  <code>(</code> <code>)</code> <code>[</code> <code>]</code>.</p>
+<ul>
+<li>Comments: <code>//</code> to end of line.</li>
+<li>Keywords: `let var fn effect class interface extends implements data</li>
+</ul>
+<p>  init this super component state view import if else while for in match   return requires ensures result and or not true false Some None Ok Err   override ai spawn stream async`</p>
+<ul>
+<li><code>null</code>, <code>nil</code>, <code>undefined</code> do not exist: using one is a dedicated</li>
+</ul>
+<p>  diagnostic <code>E_NO_NULL</code> (&quot;Nova has no null — use <code>Option[T]</code>&quot;).</p>
+<ul>
+<li>Integer literals are decimal; range-checked to signed 64-bit</li>
+</ul>
+<p>  (<code>E_INT_RANGE</code>). Float literals contain <code>.</code>. String literals are   <code>&quot;...&quot;</code> with <code>\</code> escapes.</p>
+<h2>2. Type system</h2>
+<table><thead><tr><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>Int</code></td><td>signed 64-bit. <strong>Arithmetic is checked</strong>: overflow is a runtime error (<code>R_INT_OVERFLOW</code>), never silent wraparound.</td></tr><tr><td><code>Float</code></td><td>64-bit float</td></tr><tr><td><code>String</code></td><td>UTF-8 text</td></tr><tr><td><code>Bool</code></td><td><code>true</code> / <code>false</code></td></tr><tr><td><code>Unit</code></td><td><code>()</code> — the &quot;no value&quot; value</td></tr><tr><td><code>List[T]</code></td><td>growable list; <code>push</code> mutates</td></tr><tr><td><code>Option[T]</code></td><td><code>Some(v)</code> / <code>None</code> — the only &quot;missing value&quot;</td></tr><tr><td><code>Result[T, E]</code></td><td><code>Ok(v)</code> / <code>Err(e)</code> — the only error value</td></tr><tr><td><code>Task[T]</code></td><td>a spawned concurrent task; <code>task.await() : T</code></td></tr><tr><td><code>Stream[T]</code></td><td>a typed pub/sub topic handle</td></tr><tr><td><code>Subscription[T]</code></td><td>a consumer-group subscription on a stream</td></tr><tr><td><code>Message[T]</code></td><td>one consumed record: <code>topic: String</code>, <code>offset: Int</code>, <code>key: Option[String]</code>, <code>value: T</code></td></tr><tr><td><code>IO</code>, <code>Net</code></td><td><strong>capabilities</strong>: unconstructible, unforgeable; received as parameters</td></tr><tr><td>classes / interfaces / components</td><td>nominal, Java-like</td></tr></tbody></table>
+<p>No primitive/object duality: <code>Int</code> etc. are full types. No implicit conversions, ever (<code>E_TYPE_MISMATCH</code> suggests no coercion — convert explicitly with <code>str()</code> / <code>int()</code>). No operator overloading: <code>+ - * / % == != &lt; &lt;= &gt; &gt;=</code> mean exactly one thing. Boolean operators are the keywords <code>and</code> <code>or</code> <code>not</code>.</p>
+<p>Type inference: <code>let</code> declarations usually omit the annotation; the compiler infers it. Annotations are required where inference cannot know: function/method return types (optional but recommended), <code>state</code> declarations, <code>stream</code> declarations.</p>
+<h2>3. Declarations and statements</h2>
+<pre><code>let x = 1            // immutable binding, type inferred (Int)
+let y: Float = 2.5   // explicit annotation
+var n = 0            // mutable binding
+n = n + 1            // assignment is an EXPRESSION (returns the value)</code></pre>
+<p>Statements: <code>let</code>/<code>var</code>, <code>stream</code>, expression statements, <code>return</code>, <code>if</code>/<code>else</code> (statement and expression forms), <code>while</code>, <code>for x in list</code>, <code>match</code> (expression; arms must agree in type and be exhaustive — unhandled variants are a compile error).</p>
+<h2>4. Functions, purity, effects</h2>
+<p>Functions are <strong>pure by default</strong>. Side effects are explicit:</p>
+<pre><code>fn add(a: Int, b: Int) -&gt; Int { return a + b }   // pure
+
+effect fn greet(name: String) {                  // may print
+  print(&quot;hello, &quot; + name)
+}
+
+effect io fn load(path: String, io: IO) -&gt; Result[String, String] {
+  return readFile(path, io)                      // may do file IO
+}
+
+effect net fn get(url: String, net: Net) -&gt; Result[String, String] {
+  return fetch(url, net)                         // may do network IO
+}</code></pre>
+<p>Effect lattice: <code>pure &lt; effect(console) &lt; effect io / effect net</code>. A function may only call functions whose effect is a subset of its own (<code>E_EFFECT</code> otherwise). <code>effect io</code> / <code>effect net</code> functions <strong>must</strong> receive their capability as a parameter (<code>E_CAPABILITY</code>) — capabilities are never ambient, except the trust root: the entry module receives ambient <code>io</code> / <code>net</code> bindings. Imported modules never do.</p>
+<p>Optional contracts (checked at runtime, part of the signature):</p>
+<pre><code>fn divide(a: Int, b: Int) -&gt; Int
+  requires b != 0
+  ensures result * b == a
+{
+  return a / b
+}</code></pre>
+<p>Violations fail fast: <code>R_CONTRACT_PRE</code> / <code>R_CONTRACT_POST</code>.</p>
+<p>Errors without ceremony: <code>Result[T, E]</code> + postfix <code>?</code> (propagate <code>Err</code> / <code>None</code> to the enclosing function, which must return a matching <code>Result</code>/<code>Option</code>), and <code>match</code> for handling. <code>try</code>/<code>catch</code> does not exist; <code>try</code> as an expression is <code>match</code>.</p>
+<h2>5. No null: <code>Option[T]</code></h2>
+<p>There is no null. Absence is <code>Option[T]</code> = <code>Some(v)</code> | <code>None</code>, and the compiler enforces handling: using an <code>Option[T]</code> where <code>T</code> is expected is <code>E_UNHANDLED_OPTION</code> (handle it with <code>match</code>, or <code>?</code> inside a function returning <code>Option</code>). Unwrapping without handling — <code>.unwrap()</code> / <code>.expect(msg)</code> — fails fast at runtime (<code>R_UNWRAP_NONE</code>) instead of corrupting state ten frames later.</p>
+<h2>6. Concurrency</h2>
+<p>Default model: <strong>single-threaded event loop</strong> — the React/JS mental model. No data races, no locks in user code. Two opt-in tools:</p>
+<pre><code>spawn { block }     // run block on a worker thread -&gt; Task[T]
+task.await()        // collect the Task&#x27;s result (blocks the caller)</code></pre>
+<p>Rules, enforced by the compiler:</p>
+<ul>
+<li><code>spawn</code> needs an effect context (spawning a thread is an effect).</li>
+<li>The spawn block is checked with the spawner&#x27;s effect plus <code>async</code>:</li>
+</ul>
+<p>  it may <code>await</code>, but it never gains new capabilities.</p>
+<ul>
+<li><code>?</code> may not appear directly in a spawn block (<code>E_QUESTION</code>) — it</li>
+</ul>
+<p>  would escape the task boundary. Handle <code>Result</code>/<code>Option</code> with <code>match</code>   inside the block.</p>
+<ul>
+<li><code>await</code> needs an effect context (it blocks the calling thread).</li>
+</ul>
+<p><strong>Async discipline</strong> — the compiler tells you what should be async:</p>
+<pre><code>async fn renderAll(ids: List[Int]) -&gt; List[String] { ... }
+
+async effect net fn fetchLen(url: String, net: Net) -&gt; Int {
+  let body = fetch(url, net)   // E_ASYNC_BLOCKING: blocking IO directly
+  return 0                     // in an async fn stalls the event loop
+}
+
+async effect net fn fetchOk(url: String, net: Net) -&gt; Bool {
+  let t = spawn { fetch(url, net) }   // explicitly marked off-thread: OK
+  return match t.await() {
+    Ok(body) =&gt; true,
+    Err(e) =&gt; false
+  }
+}</code></pre>
+<p>An <code>async fn</code> may <code>await</code> and print; calling anything with <code>io</code>/<code>net</code> effect directly inside it is <code>E_ASYNC_BLOCKING</code> (&quot;wrap it in <code>spawn { ... }&quot;). </code>async<code> composes with </code>io<code>/</code>net<code> (</code>async effect io fn<code>) so offloaded IO stays expressible. Calling an </code>async fn<code> is allowed from any effect context — </code>async` marks await-capability, not a caller barrier.</p>
+<p><strong>Guidance the language enforces:</strong></p>
+<table><thead><tr><th>Workload</th><th>Construct</th></tr></thead><tbody><tr><td>IO-bound (fetch, read, AI calls)</td><td><code>async fn</code> + <code>await</code></td></tr><tr><td>CPU-bound (fib, image ops, parsing)</td><td><code>spawn { }</code> worker pool</td></tr></tbody></table>
+<p>Tasks are <strong>structured</strong>: a task&#x27;s children complete before it does; every outstanding task is joined before the program exits; an un-awaited task failure surfaces at join time, never silently.</p>
+<p>Threading models (<code>app.nova</code>, or <code>NOVA_THREADING</code>):</p>
+<table><thead><tr><th>Model</th><th>Meaning</th></tr></thead><tbody><tr><td><code>single</code></td><td><code>spawn</code> runs inline, deterministically. The event-loop model, exactly.</td></tr><tr><td><code>multi</code> / <code>auto</code></td><td><code>spawn</code> runs on a worker thread pool (v1: sized to CPU count).</td></tr></tbody></table>
+<p>v2 runs the whole program on a cooperative event loop (<code>nova_lang/loop.py</code>): the root program is the root tasklet, <code>spawn_async { }</code> creates tasklets that genuinely suspend (timer/IO/future awaitables) and resume, and blocking builtins (<code>readFile</code>/<code>writeFile</code>/<code>fetch</code>/AI calls) are offloaded to an IO pool when called from a tasklet so the scheduler never stalls. <code>spawn { }</code> keeps its worker-pool parallelism. The v1 <em>discipline</em> (<code>E_ASYNC_BLOCKING</code>) is unchanged — now the loop honors it for real.</p>
+<h2>6b. Structured nurseries</h2>
+<p>A <code>nursery { }</code> block scopes child tasks: every <code>spawn</code>/<code>spawn_async</code> inside is joined before the block exits — on ALL exits. If the block raises, tasks are cancelled (best-effort: <code>spawn_async</code> tasklets observe cancellation at their next park point; <code>spawn</code> pool threads cannot be preempted and run to completion) and joined suppressively; the original error propagates.</p>
+<pre><code>nursery {
+  let a = spawn_async { sleep(0.2); print(&quot;a&quot;) }
+  let b = spawn_async { sleep(0.1); print(&quot;b&quot;) }
+}  // both joined here; &quot;b&quot; prints before &quot;a&quot;</code></pre>
+<h2>6c. Send checking</h2>
+<p>The compiler proves task blocks only share <code>Send</code> data across <code>spawn</code> boundaries — <code>E_NOT_SEND</code> at check time, no data-race caveat anymore. <code>Send</code>: primitives, <code>Option</code>/<code>Result</code> of <code>Send</code>, <code>Task</code> of <code>Send</code>, streams, <code>fn</code> references (no closures exist in Nova), and class instances whose fields are all immutable and <code>Send</code> (data classes qualify; one <code>var</code> field disqualifies). Not <code>Send</code>: <code>List</code> (mutable), capabilities, component instances. Assigning to a captured variable inside <code>spawn { }</code> is also <code>E_NOT_SEND</code>.</p>
+<h2>6d. Typed context</h2>
+<p>React-style dependency injection without prop drilling — explicit, typed, compiler-visible:</p>
+<pre><code>context theme: String = &quot;light&quot;   // declaration with required default
+
+effect fn show() {
+  print(consume theme)            // nearest provider, else the default
+}
+
+provide theme = &quot;dark&quot; {          // pushes a frame for the block
+  show()                          // prints &quot;dark&quot;
+}
+show()                            // prints &quot;light&quot; again</code></pre>
+<p><code>provide</code> frames are kept across tasklet parks; <code>spawn_async</code> tasklets inherit the spawner&#x27;s context stack lexically.</p>
+<h2>7. Streams</h2>
+<p>A <code>stream</code> declaration binds a typed, first-class pub/sub topic:</p>
+<pre><code>stream events: String              // topic &quot;events&quot;
+stream audit: String = &quot;prod.audit&quot; // explicit topic name</code></pre>
+<p>API (Kafka-like: topics, consumer groups, offsets):</p>
+<pre><code>events.publish(&quot;hello&quot;)                 // effect
+events.publish(key: &quot;k1&quot;, value: &quot;hi&quot;)  // keyed publish
+let sub = events.subscribe(group: &quot;workers&quot;)   // Subscription[String]
+match sub.poll() {                      // Option[Message[String]]
+  None =&gt; ...,
+  Some(msg) =&gt; {
+    print(msg.value)                    // String
+    print(msg.offset)                   // Int
+    sub.commit(msg)                     // effect; offset bookkeeping
+  }
+}</code></pre>
+<p>Each consumer group tracks its own cursor, so groups make independent progress over the same log. v1 ships the <strong>in-memory provider</strong> (thread-safe; local dev). The provider interface (<code>publish</code>/<code>poll</code>/<code>commit</code>) is swappable — a Kafka provider drops in for v2 without changing user code (<code>NOVA_STREAMS</code> selects it).</p>
+<h2>8. Components</h2>
+<p>Everything UI is a component. Props are immutable; state is a first-class declaration (order-independent, compiler-managed — no hook rules). The view is a type-checked JSX-like block:</p>
+<pre><code>component Counter(title: String) {
+  state count: Int = 0
+
+  view {
+    &lt;div&gt;
+      &lt;h1&gt;{title}&lt;/h1&gt;
+      &lt;p&gt;{count}&lt;/p&gt;
+      &lt;button onClick={count = count + 1}&gt;Increment&lt;/button&gt;
+    &lt;/div&gt;
+  }
+}</code></pre>
+<ul>
+<li><code>{expr}</code> interpolates; <code>&lt;for x in items&gt;</code> repeats;</li>
+</ul>
+<p>  <code>&lt;if cond&gt;...&lt;/if&gt;</code> conditions.</p>
+<ul>
+<li>Event handlers are assignments (<code>onClick={count = count + 1}</code>) —</li>
+</ul>
+<p>  assignment is an expression, so handlers are just expressions.   Handlers run with full effects and re-render afterwards.</p>
+<ul>
+<li><code>render(Counter(title: &quot;Clicks&quot;))</code> prints the virtual tree (indented)</li>
+</ul>
+<p>  and its HTML; <code>inst.fire(&quot;onClick&quot;)</code> dispatches an event.</p>
+<ul>
+<li>Props are immutable (<code>E_IMMUTABLE</code> on assignment); state mutation</li>
+</ul>
+<p>  needs an effect context.</p>
+<ul>
+<li>No prop drilling: typed context (v2 — see ROADMAP.md).</li>
+</ul>
+<h2>9. Classes and interfaces</h2>
+<pre><code>interface Shape {
+  fn area() -&gt; Float
+}
+
+class Circle implements Shape {
+  let radius: Float
+  init(radius: Float) { this.radius = radius }  // let-fields assigned in init
+  fn area() -&gt; Float { return 3.14159 * this.radius * this.radius }
+}
+
+data class Point(x: Float, y: Float)   // concise value type</code></pre>
+<p>Nominal typing with <code>extends</code> (single inheritance) and <code>implements</code>; <code>init</code> must call <code>super(...)</code> when the parent has one (<code>E_SUPER</code>). Methods default to pure; mark <code>effect</code> as needed. Encapsulation via <code>let</code> (immutable) vs <code>var</code>, and <code>_private</code> naming for modules.</p>
+<h2>10. Modules</h2>
+<pre><code>import helpers                    // helpers.nova, same directory
+helpers.greet(&quot;Ada&quot;)              // functions, classes, components</code></pre>
+<p>Explicit imports only — no classpath. <code>_names</code> are module-private (<code>E_IMPORT</code> on access). <code>nova lock</code> pins every transitive import by sha256 into <code>nova.lock</code>; <code>nova run --locked</code> verifies before running (supply-chain story, §15).</p>
+<h2>11. AI integration</h2>
+<p>First-class <code>ai</code> blocks — the return <strong>type</strong> is the output schema:</p>
+<pre><code>data class Summary(headline: String, score: Float)
+
+ai fn summarize(text: String) -&gt; Summary
+  model = &quot;nova-mock-1&quot;
+  temperature = 0.3
+  max_tokens = 256
+{
+  prompt(&quot;Summarize in one sentence: &quot; + text)
+}</code></pre>
+<ul>
+<li>Config: <code>model</code>, <code>temperature</code>, <code>max_tokens</code>, <code>stream</code> (validated;</li>
+</ul>
+<p>  <code>E_AI_CONFIG</code> otherwise).</p>
+<ul>
+<li>The body must call <code>prompt(...)</code> (<code>R_AI_NO_PROMPT</code> otherwise).</li>
+<li>The provider must return structured data conforming to the schema;</li>
+</ul>
+<p>  JSON coercion is automatic (<code>schema_json</code> derives JSON Schema from   Nova types).</p>
+<ul>
+<li>v1 runs against a deterministic <strong>mock provider</strong> (no network, no</li>
+</ul>
+<p>  key, reproducible). <code>NOVA_AI_PROVIDER=http</code> selects the experimental   HTTP hook (<code>NOVA_AI_BASE_URL</code>, <code>NOVA_AI_KEY</code>) — roadmap, not stable.</p>
+<ul>
+<li>Calling an <code>ai fn</code> needs an effect context; it has <code>net</code> effect, so</li>
+</ul>
+<p>  from <code>async</code> code it must be <code>spawn</code>-wrapped like any network IO.</p>
+<h2>12. Capabilities and secrets</h2>
+<p><code>IO</code> / <code>Net</code> are unconstructible capability types. <code>secret(name, io)</code>:</p>
+<pre><code>effect io fn dbPass(io: IO) -&gt; Result[String, String] {
+  return secret(&quot;db-password&quot;, io)
+}</code></pre>
+<p>Secrets are referenced <strong>by name</strong> and resolved by a capability-gated store — never in source. v1 store: <code>NOVA_SECRET_&lt;NAME&gt;</code> environment variables. Managed stores (AWS/GCP) are v2.</p>
+<h2>13. Security pillar</h2>
+<p>Nova treats security as a language feature, not a library concern:</p>
+<p>1. <strong>No eval, no dynamic code execution primitive.</strong> There is no    <code>eval</code>, no <code>Function(...)</code>, no runtime code loading. What runs is    what the compiler saw. (Threat defeated: prompt-injection-adjacent    codegen — an AI generating Nova cannot smuggle executable strings    past review; there is no string-to-code primitive to target.) 2. <strong>No ambient authority.</strong> IO/network/secrets require explicit    capabilities as parameters (§4, §12). A function&#x27;s signature is its    authority manifest — auditable by humans and AI alike. 3. <strong>Checked integer arithmetic.</strong> Overflow is <code>R_INT_OVERFLOW</code>, never    wraparound. (Threat defeated: the classic memory-safety-adjacent    integer bug class.) 4. <strong>Pinned supply chain.</strong> <code>nova lock</code> hashes every transitive import;    <code>--locked</code> runs refuse tampered modules. The manifest story extends    this to deployments. 5. <strong>Structured diagnostics.</strong> Every failure — compile or runtime —    is a stable error code with a message, location and suggested fix    as JSON: built for AI consumers to act on, not just humans to read. 6. <strong>Async discipline as safety.</strong> Blocking IO cannot silently stall    shared execution contexts (§6).</p>
+<h2>14. App manifest and deployment</h2>
+<p><code>app.nova</code> (optional, built-in) — convention over configuration:</p>
+<pre><code>app &quot;shop&quot; {
+  version = &quot;0.1.0&quot;
+  entry = &quot;main.nova&quot;
+  threading = &quot;auto&quot;              // single | multi | auto
+  env prod { log_level = &quot;info&quot; } // non-secret config -&gt; env vars
+  resource stream &quot;events&quot; { partitions = 4 }
+  resource secret &quot;db-password&quot; { store = &quot;env&quot; }
+  resource cron &quot;nightly&quot; { schedule = &quot;0 2 * * *&quot;, run = &quot;report.nova&quot; }
+  docker { base = &quot;python:3.12-slim&quot;, port = 8080 }
+  deploy target = &quot;local&quot;         // local | docker
+}</code></pre>
+<ul>
+<li><code>nova build</code> — validates the manifest, type-checks the entry,</li>
+</ul>
+<p>  stages <code>dist/</code> (entry + transitive imports + generated Dockerfile).</p>
+<ul>
+<li><code>nova deploy --target local</code> — runs the entry as a process with the</li>
+</ul>
+<p>  env section applied; secrets resolve from the store at runtime.   <code>resource cron</code> entries run on their schedules in a background   scheduler thread (minute granularity).</p>
+<ul>
+<li><code>nova deploy --target docker</code> — <code>docker build</code>s the staged image</li>
+</ul>
+<p>  (or prints the exact command if docker is absent).</p>
+<ul>
+<li>v1 targets: local process + Docker image. Cloud targets (AWS/GCP)</li>
+</ul>
+<p>  and managed secret stores are v2 (ROADMAP.md).</p>
+<p>Full walkthrough: <code>docs/deployment.md</code>.</p>
+<h2>15. Toolchain</h2>
+<p>One command, no toolchain maze:</p>
+<pre><code>nova run [--locked] file.nova|.nvb  run (auto-discovers app.nova for threading;
+                                .nvb executes on NovaVM)
+nova check file.nova            type-check; diagnostics as JSON on stdout
+nova fmt file.nova              canonical formatting (the ONE true style)
+nova lock file.nova             pin imports into nova.lock
+nova migrate --from java|jsx f  EXPERIMENTAL mechanical migrator
+nova build [--manifest app.nova] [--emit-bytecode]
+                                type-check + stage dist/ (+ Dockerfile);
+                                --emit-bytecode writes dist/&lt;entry&gt;.nvb
+nova dom file.nova -o out.html  EXPERIMENTAL: components -&gt; self-contained HTML
+nova eval suite.json [--provider mock|http] [--out report.json]
+                                eval harness: prompts -&gt; predicates -&gt; JSON
+nova lsp                        EXPERIMENTAL LSP server (JSON-RPC over stdio)
+nova deploy [--target local|docker|aws|gcp] [--env NAME]</code></pre>
+<p><code>nova fmt</code> is canonical — there is exactly one way to format Nova code, enforced by the toolchain (AI-native: no style debates, no style tokens wasted).</p>
+<h2>16. Diagnostics</h2>
+<p>Every diagnostic is JSON: <code>{&quot;code&quot;, &quot;message&quot;, &quot;line&quot;, &quot;col&quot;, &quot;hint?&quot;}</code>. Stable codes (selection):</p>
+<table><thead><tr><th>Code</th><th>Meaning</th></tr></thead><tbody><tr><td><code>E_NO_NULL</code></td><td><code>null</code>/<code>nil</code>/<code>undefined</code> used — use <code>Option[T]</code></td></tr><tr><td><code>E_TYPE_MISMATCH</code></td><td>types don&#x27;t unify; no implicit conversions</td></tr><tr><td><code>E_UNHANDLED_OPTION</code></td><td><code>Option[T]</code> used where <code>T</code> expected</td></tr><tr><td><code>E_EFFECT</code></td><td>effect context insufficient</td></tr><tr><td><code>E_ASYNC_BLOCKING</code></td><td>blocking IO directly in an <code>async fn</code> — wrap in <code>spawn</code></td></tr><tr><td><code>E_QUESTION</code></td><td><code>?</code> misused (incl. directly in <code>spawn</code> blocks)</td></tr><tr><td><code>E_CAPABILITY</code></td><td><code>effect io</code>/<code>net</code> fn missing its capability parameter; capabilities constructed or shadowed</td></tr><tr><td><code>E_IMMUTABLE</code></td><td>assignment to immutable binding/prop/let-field</td></tr><tr><td><code>E_INT_RANGE</code> / <code>R_INT_OVERFLOW</code></td><td>literal out of i64 range / arithmetic overflow</td></tr><tr><td><code>E_NON_EXHAUSTIVE</code></td><td><code>match</code> misses a variant</td></tr><tr><td><code>E_IMPORT</code> / <code>E_LOCK</code></td><td>module problems / lockfile mismatch</td></tr><tr><td><code>E_AI_SCHEMA</code> / <code>E_AI_CONFIG</code> / <code>R_AI_NO_PROMPT</code></td><td>AI block problems</td></tr><tr><td><code>R_UNWRAP_NONE</code> / <code>R_UNWRAP_ERR</code></td><td>unwrap on <code>None</code> / <code>Err</code></td></tr><tr><td><code>R_CONTRACT_PRE</code> / <code>R_CONTRACT_POST</code></td><td>contract violation</td></tr><tr><td><code>R_TASK_FAILED</code> / <code>R_TASK_LEAK</code></td><td>task failure / <code>?</code> escaping a task</td></tr><tr><td><code>E_NOT_SEND</code></td><td>mutable/shared state captured across a <code>spawn</code> boundary</td></tr><tr><td><code>E_TASKLET_CONTEXT</code></td><td><code>spawn_async</code> outside the event loop (e.g. in a pool thread)</td></tr><tr><td><code>R_DEADLOCK</code></td><td>tasklets parked with no possible waker</td></tr><tr><td><code>R_CANCELLED</code></td><td>tasklet cancelled (e.g. nursery exit)</td></tr></tbody></table>
+<h2>17. What Nova deliberately omits (v1)</h2>
+<p>No first-class functions, no operator overloading, no implicit conversions, no exceptions, no <code>try</code>/<code>catch</code>, no null, no eval, no macros, no inheritance of implementation beyond single <code>extends</code>, no method overloading, no global mutable state (module-level <code>var</code> is scoped to the module and discouraged).</p>
+<h2>18. NovaVM (v2 — built)</h2>
+<p>v1&#x27;s tree-walking interpreter is the reference semantics. The portability story is NovaVM: a small, portable bytecode (<code>nova_lang/bytecode.py</code>: compiler, assembler/disassembler, <code>.nvb</code> format with magic <code>NVB1</code>) executed by a dispatch-loop VM (<code>nova_lang/vm.py</code>) — still Python, stdlib only: the point is portability of the artifact, not speed.</p>
+<ul>
+<li><code>nova build --emit-bytecode</code> compiles the entry to <code>dist/&lt;entry&gt;.nvb</code></li>
+</ul>
+<p>  (type-check runs first; anything outside the subset is a clear   <code>CompileError</code>, never silently miscompiled).</p>
+<ul>
+<li><code>nova run file.nvb</code> executes on the VM. Checked 64-bit int</li>
+</ul>
+<p>  arithmetic, floats, strings, bools, lists, Option/Result, closures,   recursion — with interpreter↔VM output parity on the supported   subset.</p>
+<ul>
+<li>Subset (honest): arithmetic/vars/functions/control-flow/lists/</li>
+</ul>
+<p>  Option/Result/print. Out: effects, capabilities, spawn, streams,   classes, components, AI — compile-time rejections.</p>
+<p>Full opcode set, file format, and limits: <code>docs/v2-bytecode.md</code>.</p>
+  </article>
+</main>
+<footer class="site-footer">
+  <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
+  <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
+</footer>
+<script src="../js/main.js"></script>
+</body>
+</html>

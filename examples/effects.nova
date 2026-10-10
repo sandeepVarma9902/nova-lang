@@ -1,0 +1,30 @@
+// effects.nova — purity by default, effects by declaration.
+//
+// Functions are pure unless marked `effect`. I/O like print is an effect,
+// so the compiler rejects it inside pure functions (see tests/errors/).
+// Capabilities (IO, Net) are never ambient: they arrive as parameters.
+
+fn double(x: Int) -> Int {
+  return x * 2
+}
+
+effect fn shout(msg: String) -> Unit {
+  print(msg + "!")
+}
+
+effect io fn saveNote(text: String, cap: IO) -> Result[Unit, String] {
+  return writeFile("/tmp/nova-note.txt", text, cap)
+}
+
+print(double(21))
+shout("it works")
+
+match saveNote("hello from nova", io) {
+  Ok(_) => print("saved"),
+  Err(e) => print("save failed: " + e)
+}
+
+// EXPECT:
+// 42
+// it works!
+// saved

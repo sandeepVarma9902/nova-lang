@@ -1,0 +1,30 @@
+// api.nova — Result<T, E> and the `?` operator.
+//
+// No checked-exception ceremony: fallible functions return Result, and `?`
+// propagates the Err automatically. The happy path stays linear.
+
+effect fn fetchUser(id: Int) -> Result[String, String] {
+  if id == 1 {
+    return Ok("Ada")
+  }
+  return Err("user " + str(id) + " not found")
+}
+
+effect fn greetUser(id: Int) -> Result[String, String] {
+  let name = fetchUser(id)?   // Err returns early from greetUser
+  return Ok("Hello, " + name + "!")
+}
+
+match greetUser(1) {
+  Ok(msg) => print(msg),
+  Err(e) => print("Error: " + e)
+}
+
+match greetUser(7) {
+  Ok(msg) => print(msg),
+  Err(e) => print("Error: " + e)
+}
+
+// EXPECT:
+// Hello, Ada!
+// Error: user 7 not found

@@ -1,0 +1,11 @@
+// ERROR: E_TASKLET_CONTEXT
+// spawn_async needs the event loop: it cannot run on a spawn worker
+// thread, where there is no scheduler to park on.
+effect fn main() {
+  spawn {
+    spawn_async {
+      print("nope")
+    }
+  }
+}
+main()

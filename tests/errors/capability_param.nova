@@ -1,0 +1,4 @@
+// ERROR: E_CAPABILITY
+effect io fn f() -> Int {
+  return 1
+}

@@ -1,0 +1,2 @@
+// ERROR: E_NO_NULL
+let x = null

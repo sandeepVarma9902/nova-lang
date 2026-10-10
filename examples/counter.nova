@@ -1,0 +1,63 @@
+// counter.nova — Nova's answer to React state.
+//
+// A component declares its props as parameters and its state with `state`.
+// No hooks, no rules-of-hooks footguns: the compiler manages state, and it
+// is always correct regardless of declaration order. Event handlers are
+// just assignments; firing one updates state and re-renders.
+
+component Counter(title: String) {
+  state count: Int = 0
+
+  view {
+    <div>
+      <h1>{title}</h1>
+      <p>{count}</p>
+      <button onClick={count = count + 1}>Increment</button>
+    </div>
+  }
+}
+
+let app = render(Counter(title: "Clicks"))
+app.fire("onClick")
+app.fire("onClick")
+
+// EXPECT:
+// <div>
+//   <h1>
+//     "Clicks"
+//   </h1>
+//   <p>
+//     "0"
+//   </p>
+//   <button onClick>
+//     "Increment"
+//   </button>
+// </div>
+// --- html ---
+// <div><h1>Clicks</h1><p>0</p><button>Increment</button></div>
+// <div>
+//   <h1>
+//     "Clicks"
+//   </h1>
+//   <p>
+//     "1"
+//   </p>
+//   <button onClick>
+//     "Increment"
+//   </button>
+// </div>
+// --- html ---
+// <div><h1>Clicks</h1><p>1</p><button>Increment</button></div>
+// <div>
+//   <h1>
+//     "Clicks"
+//   </h1>
+//   <p>
+//     "2"
+//   </p>
+//   <button onClick>
+//     "Increment"
+//   </button>
+// </div>
+// --- html ---
+// <div><h1>Clicks</h1><p>2</p><button>Increment</button></div>
