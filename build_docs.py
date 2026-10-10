@@ -65,9 +65,9 @@ CHROME = """<!DOCTYPE html>
   <p>Nova — Java's discipline &times; React's soul, written for AI.</p>
   <p class="credit">Designed by Sandeep Varma &amp; Muse.</p>
 </footer>
-<script src="../js/main.js"></script>
-<script src="../js/nova-live.js"></script>
-<script src="../js/runnable.js"></script>
+<script src="../js/main.js?v=4"></script>
+<script src="../js/nova-live.js?v=4"></script>
+<script src="../js/runnable.js?v=4"></script>
 </body>
 </html>
 """
