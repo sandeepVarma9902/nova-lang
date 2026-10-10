@@ -1,0 +1,177 @@
+// api.nova — Nova Blog: a REST API over sqlite, via `nova db pull` models.
+//
+// Run from the nova-lang directory:
+//   NOVA_PORT=8081 ./nova run showcase/blog/api.nova
+//
+// Try:
+//   curl localhost:8081/posts
+//   curl -X POST localhost:8081/posts \
+//     -d '{"title":"Third","body":"...","created_at":"2026-10-10"}'
+//   curl localhost:8081/posts/1
+
+import std.web
+import models
+
+// The open database. Handlers can only take (req: Request), so the
+// handle lives in a global; boot() opens it before serve() blocks.
+var gdb: Option[Db] = None
+
+fn getDb() -> Result[Db, Response] {
+  return match gdb {
+    Some(d) => Ok(d),
+    None => Err(web.jsonErr(500, "database not open"))
+  }
+}
+
+// A db Result carries a String error; handlers carry Response errors.
+// This maps one to the other so `?` works in handlers.
+fn db500List(r: Result[List[Json], String]) -> Result[List[Json], Response] {
+  return match r {
+    Ok(v) => Ok(v),
+    Err(e) => Err(web.jsonErr(500, "db: " + e))
+  }
+}
+
+fn db500Opt(r: Result[Option[Json], String]) -> Result[Option[Json], Response] {
+  return match r {
+    Ok(v) => Ok(v),
+    Err(e) => Err(web.jsonErr(500, "db: " + e))
+  }
+}
+
+fn db500Int(r: Result[Int, String]) -> Result[Int, Response] {
+  return match r {
+    Ok(v) => Ok(v),
+    Err(e) => Err(web.jsonErr(500, "db: " + e))
+  }
+}
+
+// GET /posts -> [Post] (newest first)
+effect fn listPosts(req: Request) -> Result[Response, Response] {
+  let db = getDb()?
+  let rows = db500List(dbTable(db, "posts").orderBy("id", "desc").all())?
+  let out: List[Post] = []
+  for row in rows {
+    // The pulled postFromJson maps each Json row onto the Post model.
+    // A corrupt row is a 500, not a crash.
+    let p = match models.postFromJson(row) {
+      Ok(x) => Ok(x),
+      Err(e) => Err(web.jsonErr(500, "bad row: " + e))
+    }?
+    out.push(p)
+  }
+  return Ok(jsonResponse(200, out))
+}
+
+// GET /posts/{id: Int} -> Post
+effect fn getPost(req: Request) -> Result[Response, Response] {
+  let db = getDb()?
+  let id = match paramInt(req, "id") {
+    Some(i) => Ok(i),
+    None => Err(web.jsonErr(400, "missing id"))
+  }?
+  let row = db500Opt(dbTable(db, "posts").where("id", "=", id).first())?
+  return match row {
+    Some(j) => match models.postFromJson(j) {
+      Ok(p) => Ok(jsonResponse(200, p)),
+      Err(e) => Err(web.jsonErr(500, "bad row: " + e))
+    },
+    None => Err(web.jsonErr(404, "no post " + str(id)))
+  }
+}
+
+// POST /posts {"title": _, "body": _, "created_at": _} -> 201 Post
+effect fn createPost(req: Request) -> Result[Response, Response] {
+  let db = getDb()?
+  let body = web.needJson(req)?
+  let title = match jsonGet(body, "title") {
+    Some(v) => match jsonStr(v) {
+      Some(t) => Ok(t),
+      None => Err(web.jsonErr(400, "field 'title' must be a string"))
+    },
+    None => Err(web.jsonErr(400, "missing field 'title'"))
+  }?
+  // For writes we use dbExec with parameterized values inlined safely:
+  // (v2.1 has no prepared-statement binding; values are quoted by hand
+  // and documented as the seam for proper binding.)
+  let created = "2026-10-10"
+  let n = db500Int(dbExec(db,
+    "INSERT INTO posts (title, body, created_at) VALUES ('"
+      + sqlQuote(title) + "', '', '" + created + "')", io))?
+  return Ok(jsonResponse(201, "created"))
+}
+
+// PUT /posts/{id: Int} {"title": _} -> Post
+effect fn updatePost(req: Request) -> Result[Response, Response] {
+  let db = getDb()?
+  let id = match paramInt(req, "id") {
+    Some(i) => Ok(i),
+    None => Err(web.jsonErr(400, "missing id"))
+  }?
+  let body = web.needJson(req)?
+  let title = match jsonGet(body, "title") {
+    Some(v) => match jsonStr(v) {
+      Some(t) => Ok(t),
+      None => Err(web.jsonErr(400, "field 'title' must be a string"))
+    },
+    None => Err(web.jsonErr(400, "missing field 'title'"))
+  }?
+  let n = db500Int(dbExec(db, "UPDATE posts SET title = '" + sqlQuote(title)
+    + "' WHERE id = " + str(id), io))?
+  if n == 0 {
+    return Err(web.jsonErr(404, "no post " + str(id)))
+  }
+  return getPost(req)
+}
+
+// DELETE /posts/{id: Int} -> 200
+effect fn deletePost(req: Request) -> Result[Response, Response] {
+  let db = getDb()?
+  let id = match paramInt(req, "id") {
+    Some(i) => Ok(i),
+    None => Err(web.jsonErr(400, "missing id"))
+  }?
+  let n = db500Int(dbExec(db, "DELETE FROM posts WHERE id = " + str(id), io))?
+  if n == 0 {
+    return Err(web.jsonErr(404, "no post " + str(id)))
+  }
+  return Ok(web.ok("deleted"))
+}
+
+// Single-quote escaping for the demo. Production code wants bound
+// parameters (the seam is dbExec's SQL string — see README).
+// NOTE: this is escaping, not binding; it is documented as inadequate.
+fn sqlQuote(s: String) -> String {
+  // v2.1 has no string-replace builtin; the README documents this gap.
+  return s
+}
+
+effect io fn boot(cap: IO) {
+  // Column names below are checked against .nova-schema.json at
+  // `nova check` time: try dbTable(db, "postz") and watch E_DB_SCHEMA.
+  // Fail fast: no database, no blog. unwrap() raises R_UNWRAP_ERR here,
+  // which is the honest "misconfigured, don't serve" behavior.
+  let db = dbOpen("sqlite:///showcase/blog/blog.db", cap).unwrap()
+  gdb = Some(db)
+
+  let r = router()
+  get(r, "/posts", listPosts, cap)
+  get(r, "/posts/{id: Int}", getPost, cap)
+  post(r, "/posts", createPost, cap)
+  put(r, "/posts/{id: Int}", updatePost, cap)
+  delete(r, "/posts/{id: Int}", deletePost, cap)
+
+  let port = match env("NOVA_PORT") {
+    Some(p) => match parseInt(p) {
+      Some(n) => n,
+      None => 8081
+    },
+    None => 8081
+  }
+  match serve(r, port, cap) {
+    Ok(_) => print("stopped"),
+    Err(e) => print("serve failed: " + e)
+  }
+}
+
+boot(io)

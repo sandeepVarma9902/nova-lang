@@ -435,6 +435,45 @@ app "shop" {
 
 Full walkthrough: `docs/deployment.md`.
 
+## 14b. Nova Boot (v2.1) — the web framework in the stdlib
+
+Zero-config HTTP serving (`nova.std.web`, importable as `import std.web`):
+
+- `router()` builds a router; `get/post/put/delete/patch(r, path, handler, io)`
+  (or `route(r, method, path, handler, io)`) register handlers.
+- Typed path params: `/users/{id: Int}` — conversion failures are automatic
+  400s with structured JSON errors; unmatched routes are 404s.
+- Handlers: `effect fn (req: Request) -> Response`, or
+  `-> Result[Response, Response]` where `Err(resp)` serves that HTTP
+  response (Result-to-HTTP error mapping).
+- Middleware: `effect fn (req: Request) -> Option[Response]`; `Some` short-
+  circuits, `None` continues. Registered with `use(r, mw)`.
+- JSON: `reqJson(req)` is `Result[Json, String]`; `toJson(v)` serializes Nova
+  values (Nova types are the schema); `jsonResponse(status, v)` responds.
+- `staticDir(r, prefix, dir)` serves static files (traversal-safe).
+- `serve(r, port, io)` blocks forever; request logging is automatic.
+- `serve` needs the `IO` capability and is blocking (rejected in `async fn`).
+
+## 14c. Database nativity (v2.1)
+
+- `nova db pull --dsn sqlite:///app.db` generates `data class` models +
+  `fromJson` constructors and `.nova-schema.json` (sqlite only; postgres/
+  mysql need a driver — honest error, no stub).
+- Query builder: `dbTable(db, t).select([...]).where(col, op, val)
+  .orderBy(col, dir).limit(n).all()` / `.first()`. Literal table/column
+  names are validated against `.nova-schema.json` at check time
+  (`E_DB_SCHEMA`, best effort).
+
+## 11b. Vectors (v2.1) — RAG-native types
+
+- `Vector[N]`: fixed-dimension embedding vectors; dimension mismatches are
+  `E_TYPE_MISMATCH` at check time.
+- `ai fn embed(text: String) -> Vector[1536]` — mock provider, real
+  interface (deterministic pseudo-embeddings; swap the provider for real
+  vectors).
+- `similarity(a, b) -> Float` (cosine), `topK(q, vecs, k) -> List[Int]`
+  (ranked indices).
+
 ## 15. Toolchain
 
 One command, no toolchain maze:
@@ -454,6 +493,11 @@ nova eval suite.json [--provider mock|http] [--out report.json]
                                 eval harness: prompts -> predicates -> JSON
 nova lsp                        EXPERIMENTAL LSP server (JSON-RPC over stdio)
 nova deploy [--target local|docker|aws|gcp] [--env NAME]
+nova db pull --dsn sqlite:///app.db [--out models.nova]
+                                schema -> Nova model types + .nova-schema.json
+nova data export --from sqlite:///app.db --query "SELECT ..." --format jsonl
+                                fine-tuning datasets (train externally)
+nova test [dir]                 discover *_test.nova, run assertions, report
 ```
 
 `nova fmt` is canonical — there is exactly one way to format Nova
@@ -473,6 +517,8 @@ Stable codes (selection):
 | `E_EFFECT` | effect context insufficient |
 | `E_ASYNC_BLOCKING` | blocking IO directly in an `async fn` — wrap in `spawn` |
 | `E_QUESTION` | `?` misused (incl. directly in `spawn` blocks) |
+| `E_ROUTE` | bad route pattern (`/users/{id}` needs `{id: Int}`) |
+| `E_DB_SCHEMA` | unknown table/column/operator (best effort, via `.nova-schema.json`) |
 | `E_CAPABILITY` | `effect io`/`net` fn missing its capability parameter; capabilities constructed or shadowed |
 | `E_IMMUTABLE` | assignment to immutable binding/prop/let-field |
 | `E_INT_RANGE` / `R_INT_OVERFLOW` | literal out of i64 range / arithmetic overflow |

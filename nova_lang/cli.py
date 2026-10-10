@@ -604,7 +604,7 @@ def cmd_test(args):
         _, diags = check_source(src, path,
                                 os.path.dirname(os.path.abspath(path)),
                                 is_entry=True)
-        errs = [d for d in diags if d.severity == "error"]
+        errs = diags  # check_source only reports errors
         if errs:
             failed += 1
             failures.append((path, None,

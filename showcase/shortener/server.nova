@@ -1,0 +1,145 @@
+// app.nova — URL shortener with analytics: Nova Boot + streams.
+//
+// The platform story end to end: the shorten endpoint creates links, the
+// redirect endpoint publishes a visit event to a stream, and a subscriber
+// counts clicks per code. One language, one process.
+//
+// Run from the nova-lang directory:
+//   NOVA_PORT=8083 ./nova run showcase/shortener/app.nova
+//
+// Try:
+//   curl -X POST localhost:8083/shorten -d '{"url":"https://example.com"}'
+//   curl -i localhost:8083/abc123          # 302 redirect
+//   curl localhost:8083/stats              # {"abc123": 1}
+
+import std.web
+
+// -- the stream: one event per visit ----------------------------------
+// In production this is Kafka (NOVA_STREAMS=kafka); here it is the
+// in-memory provider. The code does not change.
+stream visits: String
+
+data class Link(code: String, url: String)
+data class Count(code: String, n: Int)
+
+var links: List[Link] = []
+var clickCounts: List[Count] = []
+var nextCode: Int = 1
+var sub: Option[Subscription[String]] = None
+
+fn findLink(code: String) -> Option[Link] {
+  for l in links {
+    if l.code == code {
+      return Some(l)
+    }
+  }
+  return None
+}
+
+// -- the analytics subscriber ------------------------------------------
+// Drains the visits stream and counts clicks per code. In a real
+// deployment this runs as its own consumer; here the redirect handler
+// drains after each publish (single-threaded server, same semantics).
+
+effect fn recordClick(code: String) {
+  var found = false
+  let updated: List[Count] = []
+  for c in clickCounts {
+    if c.code == code {
+      updated.push(Count(code: code, n: c.n + 1))
+      found = true
+    } else {
+      updated.push(c)
+    }
+  }
+  if not found {
+    updated.push(Count(code: code, n: 1))
+  }
+  clickCounts = updated
+}
+
+effect fn handleVisit(s: Subscription[String], msg: Message[String]) {
+  recordClick(msg.value)
+  s.commit(msg)
+  drainClicks(s)
+}
+
+effect fn drainClicks(s: Subscription[String]) {
+  match s.poll() {
+    Some(msg) => handleVisit(s, msg),
+    None => print("analytics caught up")
+  }
+}
+
+// -- HTTP handlers -----------------------------------------------------
+
+// POST /shorten {"url": _} -> 201 {"code": _}
+effect fn shorten(req: Request) -> Result[Response, Response] {
+  let body = web.needJson(req)?
+  let url = match jsonGet(body, "url") {
+    Some(v) => match jsonStr(v) {
+      Some(u) => Ok(u),
+      None => Err(web.jsonErr(400, "field 'url' must be a string"))
+    },
+    None => Err(web.jsonErr(400, "missing field 'url'"))
+  }?
+  let code = "c" + str(nextCode)
+  nextCode = nextCode + 1
+  links.push(Link(code: code, url: url))
+  return Ok(jsonResponse(201, code))
+}
+
+// GET /{code} -> 302 + visit event
+effect fn redirectLink(req: Request) -> Result[Response, Response] {
+  let code = match param(req, "code") {
+    Some(c) => Ok(c),
+    None => Err(web.jsonErr(400, "missing code"))
+  }?
+  let link = match findLink(code) {
+    Some(l) => Ok(l),
+    None => Err(web.jsonErr(404, "unknown code " + code))
+  }?
+  // Publish the visit event...
+  visits.publish(code)
+  // ...and run the subscriber. (Single-threaded: drain inline.)
+  match sub {
+    Some(s) => drainClicks(s),
+    None => print("no analytics subscriber")
+  }
+  return Ok(redirect(link.url))
+}
+
+// GET /stats -> {"c1": 2, ...}
+effect fn stats(req: Request) -> Result[Response, Response] {
+  // Drain any unprocessed visits first, so stats are fresh.
+  match sub {
+    Some(s) => drainClicks(s),
+    None => print("no analytics subscriber")
+  }
+  return Ok(jsonResponse(200, clickCounts))
+}
+
+effect io fn boot(cap: IO) {
+  // The analytics consumer group. Each group tracks its own offset,
+  // so adding more consumers never re-counts.
+  sub = Some(visits.subscribe(group: "analytics"))
+
+  let r = router()
+  post(r, "/shorten", shorten, cap)
+  get(r, "/stats", stats, cap)
+  get(r, "/{code: String}", redirectLink, cap)
+
+  let port = match env("NOVA_PORT") {
+    Some(p) => match parseInt(p) {
+      Some(n) => n,
+      None => 8083
+    },
+    None => 8083
+  }
+  match serve(r, port, cap) {
+    Ok(_) => print("stopped"),
+    Err(e) => print("serve failed: " + e)
+  }
+}
+
+boot(io)

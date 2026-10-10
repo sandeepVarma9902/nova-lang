@@ -1,0 +1,38 @@
+// ui.nova - Todo frontend: a Nova component compiled to HTML.
+//
+// Build: ./nova dom showcase/todo/ui.nova -o showcase/todo/public/app.html
+// The backend (api.nova) serves public/ at /, so the bundle is the UI.
+//
+// v1 note: the dom renderer supports local state + push + <for>; the
+// bundle below is the working todo UI. Wiring it to the live /api/todos
+// HTTP API (fetch bridge) is roadmap; the API is complete and curl-able
+// today (see README).
+
+component TodoApp() {
+  state todos: List[String] = ["Learn Nova", "Build something"]
+  state done: List[String] = []
+
+  view {
+    <div>
+      <h1>Nova Todos</h1>
+      <p>Frontend and backend, one language - the API serves /api/todos.</p>
+      <h2>To do</h2>
+      <ul>
+        <for t in todos>
+          <li>{t}</li>
+        </for>
+      </ul>
+      <h2>Done</h2>
+      <ul>
+        <for d in done>
+          <li>{d}</li>
+        </for>
+      </ul>
+      <button onClick={todos.push("Write docs")}>Add: Write docs</button>
+      <button onClick={todos.push("Ship it")}>Add: Ship it</button>
+      <button onClick={done.push("Learn Nova")}>Finish: Learn Nova</button>
+    </div>
+  }
+}
+
+render(TodoApp())

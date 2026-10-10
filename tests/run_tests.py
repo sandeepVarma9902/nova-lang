@@ -71,7 +71,9 @@ def test_examples():
         f for f in os.listdir(os.path.join(ROOT, "examples"))
         if f.endswith(".nova"))
     # deploy-demo is a directory; nova_helpers.nova is a helper module.
-    examples = [f for f in examples if f != "nova_helpers.nova"]
+    # boot-api.nova blocks forever serving HTTP (covered by test_boot.py).
+    examples = [f for f in examples
+                if f not in ("nova_helpers.nova", "boot-api.nova")]
     demo_main = os.path.join(ROOT, "examples", "deploy-demo", "main.nova")
     if os.path.isfile(demo_main):
         examples.append(os.path.join("deploy-demo", "main.nova"))

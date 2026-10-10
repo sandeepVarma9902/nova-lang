@@ -1,0 +1,15 @@
+{
+  "tables": {
+    "posts": {
+      "id": "Int",
+      "title": "String",
+      "body": "Option[String]",
+      "views": "Int"
+    },
+    "users": {
+      "id": "Int",
+      "name": "String",
+      "email": "Option[String]"
+    }
+  }
+}

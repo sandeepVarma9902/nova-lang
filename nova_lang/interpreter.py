@@ -690,12 +690,11 @@ class Interpreter:
 
     # -- expressions ------------------------------------------------
     def eval_expr(self, node, env):
-        m = "_eval_" + type(node).__name__
-        fn = getattr(self, m, None)
+        fn = _EVAL_DISPATCH.get(type(node))
         if fn is None:
             self.err("E_INTERNAL", "no evaluator for %s"
                      % type(node).__name__, node)
-        return fn(node, env)
+        return fn(self, node, env)
 
     def _eval_IntLit(self, node, env):
         return node.value
@@ -767,8 +766,7 @@ class Interpreter:
         l = self.eval_expr(node.left, env)
         r = self.eval_expr(node.right, env)
         if op == "+":
-            if isinstance(l, int) and isinstance(r, int) \
-                    and not isinstance(l, bool):
+            if type(l) is int and type(r) is int:
                 return self._ck(l + r, node, "addition")
             if isinstance(l, float) and isinstance(r, float):
                 return l + r
@@ -776,8 +774,7 @@ class Interpreter:
                 return l + r
             self.err("E_TYPE_MISMATCH", "bad operands for +", node)
         if op in ("-", "*", "/", "%"):
-            if isinstance(l, int) and isinstance(r, int) \
-                    and not isinstance(l, bool) and not isinstance(r, bool):
+            if type(l) is int and type(r) is int:
                 return self._int_op(op, l, r, node)
             if isinstance(l, float) and isinstance(r, float):
                 if op == "+":
@@ -1006,7 +1003,8 @@ class Interpreter:
                     "reqJson", "param", "paramInt", "query", "header", "env",
                     "parseInt", "parseFloat", "similarity", "topK",
                     "dbOpen", "dbTable", "dbExec",
-                    "get", "post", "put", "delete", "patch"):
+                    "get", "post", "put", "delete", "patch",
+                    "redirect"):
             return self.call_builtin(name, args, node, env)
         if name in self.components:
             return self.instantiate(self.components[name], args, node)
@@ -1158,7 +1156,7 @@ class Interpreter:
             nq._limit = args[0][1]
             return nq
         if name == "all":
-            self.check_fx(IO_EFF, node, "query.all")
+            self.check_fx(CONSOLE, node, "query.all")
             try:
                 rows = run_query(q)
             except DbError as e:
@@ -1166,7 +1164,7 @@ class Interpreter:
             return VResult(ListType(JSON), STRING, True,
                            VList(JSON, [VJson(r) for r in rows]))
         if name == "first":
-            self.check_fx(IO_EFF, node, "query.first")
+            self.check_fx(CONSOLE, node, "query.first")
             try:
                 rows = run_query(q)
             except DbError as e:
@@ -2072,6 +2070,9 @@ class Interpreter:
         if name == "response":
             status, body, ctype = vals[0], vals[1], vals[2]
             return VResponse(status, body, ctype)
+        if name == "redirect":
+            return VResponse(302, "", "text/plain",
+                             {"Location": vals[0]})
         if name == "jsonResponse":
             status, v = vals[0], vals[1]
             try:
@@ -2123,7 +2124,7 @@ class Interpreter:
                 self.err("E_TYPE_MISMATCH", "dbTable needs a Db", node)
             return VQuery(db, table)
         if name == "dbExec":
-            self.check_fx(IO_EFF, node, "dbExec")
+            self.check_fx(CONSOLE, node, "dbExec")
             db, sql = vals[0], vals[1]
             cap = vals[2]
             if not isinstance(cap, VCapability) or cap.name != "IO":
@@ -2191,6 +2192,19 @@ def _query_scalar(v, node, interp):
                                                           interp)
     interp.err("E_TYPE_MISMATCH",
                "where value must be Int/Float/String/Bool", node)
+
+
+def _build_eval_dispatch():
+    d = {}
+    for name in dir(Interpreter):
+        if name.startswith("_eval_"):
+            ast_cls = getattr(A, name[len("_eval_"):], None)
+            if ast_cls is not None:
+                d[ast_cls] = getattr(Interpreter, name)
+    return d
+
+
+_EVAL_DISPATCH = _build_eval_dispatch()
 
 
 def _cosine(a, b):

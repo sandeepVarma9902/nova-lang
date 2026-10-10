@@ -1,0 +1,12 @@
+// ERROR: E_TYPE_MISMATCH
+ai fn embed(text: String) -> Vector[8]
+  model = "m"
+{
+  prompt(text)
+}
+
+effect net fn f(cap: Net) -> Float {
+  let a = embed("hello")
+  let b: Vector[4] = embed("hello")
+  return similarity(a, b)
+}

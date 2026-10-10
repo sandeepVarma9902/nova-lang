@@ -201,6 +201,367 @@ class VM:
         pop = stack.pop
         push = stack.append
 
+        # -- opcode handlers: table dispatch --------------------
+        # Each handler closes over push/pop/stack/frames/self.
+        # Dispatch is a single tuple index instead of a 39-way
+        # if/elif chain.
+        def do_LOAD_CONST(f, code, op, arg):
+            push(code.consts[arg])
+        def do_POP(f, code, op, arg):
+            pop()
+        def do_DUP(f, code, op, arg):
+            push(stack[-1])
+
+        def do_LOAD_VAR_STORE_VAR(f, code, op, arg):
+            fr = f
+            depth = arg >> 8
+            slot = arg & 0xFF
+            for _ in range(depth):
+                fr = fr.parent
+                if fr is None:
+                    self._err(f, "E_INTERNAL", "bad variable scope")
+            if op == Op.LOAD_VAR:
+                v = fr.cells[slot]
+                if v is UNSET:
+                    self._err(f, "E_UNDEFINED",
+                               "variable used before initialization")
+                push(v)
+            else:
+                fr.cells[slot] = pop()
+
+        def do_ADD(f, code, op, arg):
+            r = pop()
+            l = pop()
+            if (isinstance(l, int) and isinstance(r, int)
+                    and not isinstance(l, bool)
+                    and not isinstance(r, bool)):
+                push(self._ck(f, l + r, "addition"))
+            elif isinstance(l, float) and isinstance(r, float):
+                push(l + r)
+            elif isinstance(l, str) and isinstance(r, str):
+                push(l + r)
+            else:
+                self._err(f, "E_TYPE_MISMATCH", "bad operands for +")
+        def do_SUB_MUL(f, code, op, arg):
+            r = pop()
+            l = pop()
+            what = "subtraction" if op == Op.SUB else "multiplication"
+            if (isinstance(l, int) and isinstance(r, int)
+                    and not isinstance(l, bool)
+                    and not isinstance(r, bool)):
+                push(self._ck(f, l - r if op == Op.SUB else l * r,
+                              what))
+            elif isinstance(l, float) and isinstance(r, float):
+                push(l - r if op == Op.SUB else l * r)
+            else:
+                self._err(f, "E_TYPE_MISMATCH",
+                           "bad operands for %s" % what)
+        def do_DIV(f, code, op, arg):
+            r = pop()
+            l = pop()
+            if (isinstance(l, int) and isinstance(r, int)
+                    and not isinstance(l, bool)
+                    and not isinstance(r, bool)):
+                push(self._int_divmod(f, l, r, "division"))
+            elif isinstance(l, float) and isinstance(r, float):
+                if r == 0:
+                    self._err(f, "R_DIV_ZERO", "division by zero")
+                push(l / r)
+            else:
+                self._err(f, "E_TYPE_MISMATCH", "bad operands for /")
+        def do_MOD(f, code, op, arg):
+            r = pop()
+            l = pop()
+            if (isinstance(l, int) and isinstance(r, int)
+                    and not isinstance(l, bool)
+                    and not isinstance(r, bool)):
+                q = self._int_divmod(f, l, r, "modulo")
+                push(l - q * r)
+            else:
+                self._err(f, "E_TYPE_MISMATCH",
+                           "% on Floats not supported"
+                           if isinstance(l, float) else
+                           "bad operands for %")
+        def do_NEG(f, code, op, arg):
+            v = pop()
+            if isinstance(v, bool):
+                self._err(f, "E_TYPE_MISMATCH", "unary - on Bool")
+            elif isinstance(v, int):
+                push(self._ck(f, -v, "negation"))
+            elif isinstance(v, float):
+                push(-v)
+            else:
+                self._err(f, "E_TYPE_MISMATCH",
+                           "unary - needs Int or Float")
+        def do_NOT(f, code, op, arg):
+            v = pop()
+            if v is True:
+                push(False)
+            elif v is False:
+                push(True)
+            else:
+                self._err(f, "E_TYPE_MISMATCH", "not needs a Bool")
+
+        def do_EQ_NE(f, code, op, arg):
+            r = pop()
+            l = pop()
+            eq = self._equals(l, r)
+            push(eq if op == Op.EQ else not eq)
+        def do_LT_LE_GT_GE(f, code, op, arg):
+            r = pop()
+            l = pop()
+            if (isinstance(l, bool) or isinstance(r, bool)
+                    or type(l) is not type(r)
+                    or not isinstance(l, (int, float))):
+                self._err(f, "E_TYPE_MISMATCH",
+                           "comparison needs two Ints or two Floats")
+            push({Op.LT: l < r, Op.LE: l <= r,
+                  Op.GT: l > r, Op.GE: l >= r}[op])
+
+        def do_JUMP(f, code, op, arg):
+            f.ip = arg
+        def do_JUMP_IF_FALSE(f, code, op, arg):
+            v = pop()
+            if v is False:
+                f.ip = arg
+            elif v is not True:
+                self._err(f, "E_TYPE_MISMATCH",
+                           "condition must be Bool")
+        def do_JUMP_IF_TRUE(f, code, op, arg):
+            v = pop()
+            if v is True:
+                f.ip = arg
+            elif v is not False:
+                self._err(f, "E_TYPE_MISMATCH",
+                           "condition must be Bool")
+
+        def do_MAKE_FUNCTION(f, code, op, arg):
+            push(VFunc(fcodes[arg], f))
+        def do_CALL(f, code, op, arg):
+            # Convention: args are pushed first, callee last, so the
+            # callee is popped first.
+            callee = pop()
+            args = [pop() for _ in range(arg)]
+            args.reverse()
+            if not isinstance(callee, VFunc):
+                self._err(f, "E_NOT_CALLABLE", "not callable")
+            ccode = callee.code
+            if ccode.nparams != arg:
+                self._err(f, "E_ARGC",
+                           "'%s' takes %d argument(s), got %d"
+                           % (ccode.name, ccode.nparams, arg))
+            cells = [UNSET] * ccode.nslots
+            for i, v in enumerate(args):
+                cells[i] = v
+            frames.append(_Frame(ccode, cells, callee.frame,
+                                 len(stack)))
+        def do_RETURN(f, code, op, arg):
+            v = pop()
+            base = f.stack_base
+            del stack[base:]
+            frames.pop()
+            if frames:
+                push(v)
+            # else: entry returned — halt
+
+        def do_BUILD_LIST(f, code, op, arg):
+            items = [pop() for _ in range(arg)]
+            items.reverse()
+            push(VList(items))
+        def do_MAKE_VARIANT(f, code, op, arg):
+            if arg == 1:
+                push(VOption(None))
+            else:
+                v = pop()
+                if arg == 0:
+                    push(VOption(v))
+                elif arg == 2:
+                    push(VResult(True, v))
+                elif arg == 3:
+                    push(VResult(False, v))
+                else:
+                    self._err(f, "E_INTERNAL", "bad variant kind")
+        def do_INDEX(f, code, op, arg):
+            i = pop()
+            o = pop()
+            if (isinstance(o, VList) and isinstance(i, int)
+                    and not isinstance(i, bool)):
+                if not 0 <= i < len(o.items):
+                    self._err(f, "R_INDEX_OUT_OF_BOUNDS",
+                               "index %d" % i)
+                push(o.items[i])
+            else:
+                self._err(f, "E_TYPE_MISMATCH", "cannot index")
+        def do_STORE_INDEX(f, code, op, arg):
+            v = pop()
+            i = pop()
+            o = pop()
+            if (isinstance(o, VList) and isinstance(i, int)
+                    and not isinstance(i, bool)
+                    and 0 <= i < len(o.items)):
+                o.items[i] = v
+                push(v)
+            elif isinstance(o, VList):
+                self._err(f, "R_INDEX_OUT_OF_BOUNDS", "index %d" % i
+                           if isinstance(i, int) else "bad index")
+            else:
+                self._err(f, "E_TYPE_MISMATCH", "cannot index-assign")
+        def do_TAG_OF(f, code, op, arg):
+            v = pop()
+            if isinstance(v, VOption):
+                push(0 if v.value is None else 1)
+            elif isinstance(v, VResult):
+                push(2 if v.is_ok else 3)
+            else:
+                push(4)
+        def do_VARIANT_VALUE(f, code, op, arg):
+            v = pop()
+            if isinstance(v, VOption) and v.value is not None:
+                push(v.value)
+            elif isinstance(v, VResult):
+                push(v.value)
+            else:
+                self._err(f, "E_TYPE_MISMATCH",
+                           "not a Some/Ok/Err value")
+        def do_UNWRAP_OR_RETURN(f, code, op, arg):
+            # The `?` operator.
+            v = pop()
+            # Propagating an Err/None returns it as this call's
+            # result — the same frame-unwind as RETURN.
+            propagate = (
+                (isinstance(v, VResult) and not v.is_ok)
+                or (isinstance(v, VOption) and v.value is None))
+            if isinstance(v, VResult) and v.is_ok:
+                push(v.value)
+            elif isinstance(v, VOption) and v.value is not None:
+                push(v.value)
+            elif propagate:
+                base = f.stack_base
+                del stack[base:]
+                frames.pop()
+                if frames:
+                    push(v)
+                else:
+                    self._err(None, "E_QUESTION",
+                               "`?` propagated out of the entry point")
+            else:
+                self._err(f, "E_QUESTION", "? needs Result or Option")
+
+        def do_LEN(f, code, op, arg):
+            v = pop()
+            if isinstance(v, VList):
+                push(len(v.items))
+            else:
+                self._err(f, "E_TYPE_MISMATCH", "len() needs a List")
+        def do_LIST_PUSH(f, code, op, arg):
+            v = pop()
+            o = pop()
+            if not isinstance(o, VList):
+                self._err(f, "E_TYPE_MISMATCH",
+                           "push needs a List")
+            o.items.append(v)
+            push(VUNIT)
+        def do_UNWRAP_MSG(f, code, op, arg):
+            msg = pop()
+            v = pop()
+            text = msg if isinstance(msg, str) else None
+            if isinstance(v, VOption):
+                if v.value is None:
+                    self._err(f, "R_UNWRAP_NONE",
+                               "unwrap on None%s"
+                               % (": " + text if text else ""))
+                push(v.value)
+            elif isinstance(v, VResult):
+                if not v.is_ok:
+                    self._err(f, "R_UNWRAP_ERR",
+                               "unwrap on Err%s"
+                               % (": " + text if text else ""))
+                push(v.value)
+            else:
+                self._err(f, "E_TYPE_MISMATCH",
+                           "unwrap needs Option or Result")
+        def do_PRINT(f, code, op, arg):
+            vals = [pop() for _ in range(arg)]
+            vals.reverse()
+            self.output.append(" ".join(nova_repr(v) for v in vals))
+            push(VUNIT)
+        def do_STR(f, code, op, arg):
+            push(nova_repr(pop()))
+        def do_INT_OF(f, code, op, arg):
+            v = pop()
+            if isinstance(v, bool):
+                self._err(f, "E_TYPE_MISMATCH",
+                           "int() needs an Int or Float")
+            elif isinstance(v, int):
+                t = v
+            elif isinstance(v, float):
+                import math
+                t = math.trunc(v)
+            else:
+                self._err(f, "E_TYPE_MISMATCH",
+                           "int() needs an Int or Float")
+            if t < INT_MIN or t > INT_MAX:
+                self._err(f, "R_INT_OVERFLOW", "int() out of range")
+            push(t)
+        def do_ASSERT(f, code, op, arg):
+            vals = [pop() for _ in range(arg)]
+            vals.reverse()
+            if vals[0] is not True:
+                msg = vals[1] if arg == 2 else "assertion failed"
+                self._err(f, "R_ASSERT", "assert failed: %s" % msg)
+            push(VUNIT)
+        def do_FAIL(f, code, op, arg):
+            self._err(f, "E_INTERNAL", str(code.consts[arg]))
+
+
+
+        def _op_bad(f, code, op, arg):
+            self._err(f, "E_INTERNAL", "unknown opcode %d" % op)
+
+        handlers = (
+            _op_bad,  # 0
+            do_LOAD_CONST,  # 1
+            do_POP,  # 2
+            do_DUP,  # 3
+            do_LOAD_VAR_STORE_VAR,  # 4
+            do_LOAD_VAR_STORE_VAR,  # 5
+            do_ADD,  # 6
+            do_SUB_MUL,  # 7
+            do_SUB_MUL,  # 8
+            do_DIV,  # 9
+            do_MOD,  # 10
+            do_NEG,  # 11
+            do_NOT,  # 12
+            do_EQ_NE,  # 13
+            do_EQ_NE,  # 14
+            do_LT_LE_GT_GE,  # 15
+            do_LT_LE_GT_GE,  # 16
+            do_LT_LE_GT_GE,  # 17
+            do_LT_LE_GT_GE,  # 18
+            do_JUMP,  # 19
+            do_JUMP_IF_FALSE,  # 20
+            do_JUMP_IF_TRUE,  # 21
+            do_MAKE_FUNCTION,  # 22
+            do_CALL,  # 23
+            do_RETURN,  # 24
+            do_BUILD_LIST,  # 25
+            do_MAKE_VARIANT,  # 26
+            do_INDEX,  # 27
+            do_STORE_INDEX,  # 28
+            do_TAG_OF,  # 29
+            do_VARIANT_VALUE,  # 30
+            do_UNWRAP_OR_RETURN,  # 31
+            do_LEN,  # 32
+            do_LIST_PUSH,  # 33
+            do_UNWRAP_MSG,  # 34
+            do_PRINT,  # 35
+            do_STR,  # 36
+            do_INT_OF,  # 37
+            do_ASSERT,  # 38
+            do_FAIL,  # 39
+        )
+
+        n_handlers = len(handlers)
         while frames:
             f = frames[-1]
             code = f.code
@@ -215,324 +576,8 @@ class VM:
                            "execution budget exceeded (possible infinite "
                            "loop)")
 
-            # -- stack --------------------------------------------------
-            if op == Op.LOAD_CONST:
-                push(code.consts[arg])
-            elif op == Op.POP:
-                pop()
-            elif op == Op.DUP:
-                push(stack[-1])
-
-            # -- variables ----------------------------------------------
-            elif op == Op.LOAD_VAR or op == Op.STORE_VAR:
-                fr = f
-                depth = arg >> 8
-                slot = arg & 0xFF
-                for _ in range(depth):
-                    fr = fr.parent
-                    if fr is None:
-                        self._err(f, "E_INTERNAL", "bad variable scope")
-                if op == Op.LOAD_VAR:
-                    v = fr.cells[slot]
-                    if v is UNSET:
-                        self._err(f, "E_UNDEFINED",
-                                   "variable used before initialization")
-                    push(v)
-                else:
-                    fr.cells[slot] = pop()
-
-            # -- arithmetic ----------------------------------------------
-            elif op == Op.ADD:
-                r = pop()
-                l = pop()
-                if (isinstance(l, int) and isinstance(r, int)
-                        and not isinstance(l, bool)
-                        and not isinstance(r, bool)):
-                    push(self._ck(f, l + r, "addition"))
-                elif isinstance(l, float) and isinstance(r, float):
-                    push(l + r)
-                elif isinstance(l, str) and isinstance(r, str):
-                    push(l + r)
-                else:
-                    self._err(f, "E_TYPE_MISMATCH", "bad operands for +")
-            elif op == Op.SUB or op == Op.MUL:
-                r = pop()
-                l = pop()
-                what = "subtraction" if op == Op.SUB else "multiplication"
-                if (isinstance(l, int) and isinstance(r, int)
-                        and not isinstance(l, bool)
-                        and not isinstance(r, bool)):
-                    push(self._ck(f, l - r if op == Op.SUB else l * r,
-                                  what))
-                elif isinstance(l, float) and isinstance(r, float):
-                    push(l - r if op == Op.SUB else l * r)
-                else:
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "bad operands for %s" % what)
-            elif op == Op.DIV:
-                r = pop()
-                l = pop()
-                if (isinstance(l, int) and isinstance(r, int)
-                        and not isinstance(l, bool)
-                        and not isinstance(r, bool)):
-                    push(self._int_divmod(f, l, r, "division"))
-                elif isinstance(l, float) and isinstance(r, float):
-                    if r == 0:
-                        self._err(f, "R_DIV_ZERO", "division by zero")
-                    push(l / r)
-                else:
-                    self._err(f, "E_TYPE_MISMATCH", "bad operands for /")
-            elif op == Op.MOD:
-                r = pop()
-                l = pop()
-                if (isinstance(l, int) and isinstance(r, int)
-                        and not isinstance(l, bool)
-                        and not isinstance(r, bool)):
-                    q = self._int_divmod(f, l, r, "modulo")
-                    push(l - q * r)
-                else:
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "% on Floats not supported"
-                               if isinstance(l, float) else
-                               "bad operands for %")
-            elif op == Op.NEG:
-                v = pop()
-                if isinstance(v, bool):
-                    self._err(f, "E_TYPE_MISMATCH", "unary - on Bool")
-                elif isinstance(v, int):
-                    push(self._ck(f, -v, "negation"))
-                elif isinstance(v, float):
-                    push(-v)
-                else:
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "unary - needs Int or Float")
-            elif op == Op.NOT:
-                v = pop()
-                if v is True:
-                    push(False)
-                elif v is False:
-                    push(True)
-                else:
-                    self._err(f, "E_TYPE_MISMATCH", "not needs a Bool")
-
-            # -- comparison -----------------------------------------------
-            elif op == Op.EQ or op == Op.NE:
-                r = pop()
-                l = pop()
-                eq = self._equals(l, r)
-                push(eq if op == Op.EQ else not eq)
-            elif op in (Op.LT, Op.LE, Op.GT, Op.GE):
-                r = pop()
-                l = pop()
-                if (isinstance(l, bool) or isinstance(r, bool)
-                        or type(l) is not type(r)
-                        or not isinstance(l, (int, float))):
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "comparison needs two Ints or two Floats")
-                push({Op.LT: l < r, Op.LE: l <= r,
-                      Op.GT: l > r, Op.GE: l >= r}[op])
-
-            # -- jumps ------------------------------------------------------
-            elif op == Op.JUMP:
-                f.ip = arg
-            elif op == Op.JUMP_IF_FALSE:
-                v = pop()
-                if v is False:
-                    f.ip = arg
-                elif v is not True:
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "condition must be Bool")
-            elif op == Op.JUMP_IF_TRUE:
-                v = pop()
-                if v is True:
-                    f.ip = arg
-                elif v is not False:
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "condition must be Bool")
-
-            # -- functions ----------------------------------------------------
-            elif op == Op.MAKE_FUNCTION:
-                push(VFunc(fcodes[arg], f))
-            elif op == Op.CALL:
-                # Convention: args are pushed first, callee last, so the
-                # callee is popped first.
-                callee = pop()
-                args = [pop() for _ in range(arg)]
-                args.reverse()
-                if not isinstance(callee, VFunc):
-                    self._err(f, "E_NOT_CALLABLE", "not callable")
-                ccode = callee.code
-                if ccode.nparams != arg:
-                    self._err(f, "E_ARGC",
-                               "'%s' takes %d argument(s), got %d"
-                               % (ccode.name, ccode.nparams, arg))
-                cells = [UNSET] * ccode.nslots
-                for i, v in enumerate(args):
-                    cells[i] = v
-                frames.append(_Frame(ccode, cells, callee.frame,
-                                     len(stack)))
-            elif op == Op.RETURN:
-                v = pop()
-                base = f.stack_base
-                del stack[base:]
-                frames.pop()
-                if frames:
-                    push(v)
-                # else: entry returned — halt
-
-            # -- data structures ----------------------------------------------
-            elif op == Op.BUILD_LIST:
-                items = [pop() for _ in range(arg)]
-                items.reverse()
-                push(VList(items))
-            elif op == Op.MAKE_VARIANT:
-                if arg == 1:
-                    push(VOption(None))
-                else:
-                    v = pop()
-                    if arg == 0:
-                        push(VOption(v))
-                    elif arg == 2:
-                        push(VResult(True, v))
-                    elif arg == 3:
-                        push(VResult(False, v))
-                    else:
-                        self._err(f, "E_INTERNAL", "bad variant kind")
-            elif op == Op.INDEX:
-                i = pop()
-                o = pop()
-                if (isinstance(o, VList) and isinstance(i, int)
-                        and not isinstance(i, bool)):
-                    if not 0 <= i < len(o.items):
-                        self._err(f, "R_INDEX_OUT_OF_BOUNDS",
-                                   "index %d" % i)
-                    push(o.items[i])
-                else:
-                    self._err(f, "E_TYPE_MISMATCH", "cannot index")
-            elif op == Op.STORE_INDEX:
-                v = pop()
-                i = pop()
-                o = pop()
-                if (isinstance(o, VList) and isinstance(i, int)
-                        and not isinstance(i, bool)
-                        and 0 <= i < len(o.items)):
-                    o.items[i] = v
-                    push(v)
-                elif isinstance(o, VList):
-                    self._err(f, "R_INDEX_OUT_OF_BOUNDS", "index %d" % i
-                               if isinstance(i, int) else "bad index")
-                else:
-                    self._err(f, "E_TYPE_MISMATCH", "cannot index-assign")
-            elif op == Op.TAG_OF:
-                v = pop()
-                if isinstance(v, VOption):
-                    push(0 if v.value is None else 1)
-                elif isinstance(v, VResult):
-                    push(2 if v.is_ok else 3)
-                else:
-                    push(4)
-            elif op == Op.VARIANT_VALUE:
-                v = pop()
-                if isinstance(v, VOption) and v.value is not None:
-                    push(v.value)
-                elif isinstance(v, VResult):
-                    push(v.value)
-                else:
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "not a Some/Ok/Err value")
-            elif op == Op.UNWRAP_OR_RETURN:
-                # The `?` operator.
-                v = pop()
-                # Propagating an Err/None returns it as this call's
-                # result — the same frame-unwind as RETURN.
-                propagate = (
-                    (isinstance(v, VResult) and not v.is_ok)
-                    or (isinstance(v, VOption) and v.value is None))
-                if isinstance(v, VResult) and v.is_ok:
-                    push(v.value)
-                elif isinstance(v, VOption) and v.value is not None:
-                    push(v.value)
-                elif propagate:
-                    base = f.stack_base
-                    del stack[base:]
-                    frames.pop()
-                    if frames:
-                        push(v)
-                    else:
-                        self._err(None, "E_QUESTION",
-                                   "`?` propagated out of the entry point")
-                else:
-                    self._err(f, "E_QUESTION", "? needs Result or Option")
-
-            # -- builtins -------------------------------------------------------
-            elif op == Op.LEN:
-                v = pop()
-                if isinstance(v, VList):
-                    push(len(v.items))
-                else:
-                    self._err(f, "E_TYPE_MISMATCH", "len() needs a List")
-            elif op == Op.LIST_PUSH:
-                v = pop()
-                o = pop()
-                if not isinstance(o, VList):
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "push needs a List")
-                o.items.append(v)
-                push(VUNIT)
-            elif op == Op.UNWRAP_MSG:
-                msg = pop()
-                v = pop()
-                text = msg if isinstance(msg, str) else None
-                if isinstance(v, VOption):
-                    if v.value is None:
-                        self._err(f, "R_UNWRAP_NONE",
-                                   "unwrap on None%s"
-                                   % (": " + text if text else ""))
-                    push(v.value)
-                elif isinstance(v, VResult):
-                    if not v.is_ok:
-                        self._err(f, "R_UNWRAP_ERR",
-                                   "unwrap on Err%s"
-                                   % (": " + text if text else ""))
-                    push(v.value)
-                else:
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "unwrap needs Option or Result")
-            elif op == Op.PRINT:
-                vals = [pop() for _ in range(arg)]
-                vals.reverse()
-                self.output.append(" ".join(nova_repr(v) for v in vals))
-                push(VUNIT)
-            elif op == Op.STR:
-                push(nova_repr(pop()))
-            elif op == Op.INT_OF:
-                v = pop()
-                if isinstance(v, bool):
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "int() needs an Int or Float")
-                elif isinstance(v, int):
-                    t = v
-                elif isinstance(v, float):
-                    import math
-                    t = math.trunc(v)
-                else:
-                    self._err(f, "E_TYPE_MISMATCH",
-                               "int() needs an Int or Float")
-                if t < INT_MIN or t > INT_MAX:
-                    self._err(f, "R_INT_OVERFLOW", "int() out of range")
-                push(t)
-            elif op == Op.ASSERT:
-                vals = [pop() for _ in range(arg)]
-                vals.reverse()
-                if vals[0] is not True:
-                    msg = vals[1] if arg == 2 else "assertion failed"
-                    self._err(f, "R_ASSERT", "assert failed: %s" % msg)
-                push(VUNIT)
-            elif op == Op.FAIL:
-                self._err(f, "E_INTERNAL", str(code.consts[arg]))
-            else:
-                self._err(f, "E_INTERNAL",
-                           "unknown opcode %d" % op)
+            h = handlers[op] if 0 <= op < n_handlers else _op_bad
+            h(f, code, op, arg)
         return self.output
 
 

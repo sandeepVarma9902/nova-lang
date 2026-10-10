@@ -1,0 +1,6 @@
+// ERROR: E_DB_SCHEMA
+effect io fn q(cap: IO) -> Result[String, String] {
+  let db = dbOpen("sqlite:///x.db", cap)?
+  let q = dbTable(db, "no_such_table")
+  return Ok("x")
+}

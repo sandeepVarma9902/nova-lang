@@ -1,0 +1,10 @@
+// ERROR: E_ROUTE
+effect fn h(req: Request) -> Response {
+  return response(200, "x", "text/plain")
+}
+
+effect io fn boot(cap: IO) {
+  let r = router()
+  route(r, "GET", "/users/{id}", h, cap)
+}
+boot(io)

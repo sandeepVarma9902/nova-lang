@@ -1383,7 +1383,8 @@ class Checker:
                         "reqPath", "reqBody", "reqJson", "param", "paramInt",
                         "query", "header", "env", "parseInt", "parseFloat",
                         "similarity", "topK", "dbOpen", "dbTable", "dbExec",
-                        "get", "post", "put", "delete", "patch"):
+                        "get", "post", "put", "delete", "patch",
+                        "redirect"):
                 return self._check_builtin(name, node, scope)
             if sym is None:
                 self.error("E_UNDEFINED", "undefined name '%s'" % name, func)
@@ -1674,6 +1675,9 @@ class Checker:
             self._check_arg_types(name, [INT, STRING, STRING], vals, args,
                                   node)
             return RESPONSE
+        if name == "redirect":
+            self._check_arg_types(name, [STRING], vals, args, node)
+            return RESPONSE
         if name == "jsonResponse":
             if len(vals) != 2:
                 self.error("E_ARGC", "jsonResponse takes 2 arguments",
@@ -1719,7 +1723,7 @@ class Checker:
                 self._check_db_table(table, args[1][1])
             return QueryType(table)
         if name == "dbExec":
-            self._need_effect(IO_EFF, node, "dbExec")
+            self._need_effect(CONSOLE, node, "dbExec")
             self._check_arg_types(name, [DB, STRING, _Cap("IO")], vals,
                                   args, node)
             return ResultType(INT, STRING)
@@ -1906,12 +1910,12 @@ class Checker:
             self.check_compatible(INT, lt, args[0][1], "limit")
             return QueryType(table)
         if name == "all":
-            self._need_effect(IO_EFF, node, "query.all")
+            self._need_effect(CONSOLE, node, "query.all")
             if args:
                 self.error("E_ARGC", "all takes no arguments", node)
             return ResultType(ListType(JSON), STRING)
         if name == "first":
-            self._need_effect(IO_EFF, node, "query.first")
+            self._need_effect(CONSOLE, node, "query.first")
             if args:
                 self.error("E_ARGC", "first takes no arguments", node)
             return ResultType(OptionType(JSON), STRING)

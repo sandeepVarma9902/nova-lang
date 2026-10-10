@@ -1,13 +1,20 @@
 // rag.nova — RAG-native Nova: Vector[N], ai embed, similarity, topK.
 //
-// Vectors are first-class types: Vector[1536] is checked at compile time,
+// Vectors are first-class types: Vector[8] is checked at compile time,
 // and mixing dimensions is a type error. `ai embed` is a mock provider
-// with the real interface (swap the provider for a real one later);
-// similarity/topK are exact stdlib math.
+// with the real interface (deterministic, so this example is stable);
+// similarity/topK are exact stdlib math over the vectors.
 //
 // Run: ./nova run examples/rag.nova
 
-// A tiny knowledge base.
+// The embedding interface. The mock provider turns the prompt into a
+// deterministic pseudo-embedding; a real provider returns real vectors.
+ai fn embed(text: String) -> Vector[8]
+  model = "nova-mock-embed-1"
+{
+  prompt("Embed this text: " + text)
+}
+
 let docs: List[String] = [
   "Nova is a programming language designed for AI agents",
   "The NovaVM executes bytecode compiled from Nova source",
@@ -15,36 +22,33 @@ let docs: List[String] = [
   "Python is a popular programming language"
 ]
 
-// Embed every document. In production this is one `ai` call per chunk,
-// stored next to the text; here the mock embeds deterministically.
-effect fn embedAll(cap: Net) -> List[Vector[8]] {
+effect net fn embedAll(cap: Net) -> List[Vector[8]] {
   let vecs: List[Vector[8]] = []
   for d in docs {
-    vecs.push(ai embed(d, cap))
+    vecs.push(embed(d))
   }
   return vecs
 }
 
-effect fn main(cap: Net) {
+effect net fn search(query: String, k: Int, cap: Net) {
   let vecs = embedAll(cap)
-  let q = ai embed("how do Nova programs run?", cap)
-
-  // Rank documents by cosine similarity, take the top 2.
-  let top = topK(q, vecs, 2)
-  print("query: how do Nova programs run?")
+  let q = embed(query)
+  // Rank documents by cosine similarity, take the top k.
+  let top = topK(q, vecs, k)
+  print("query: " + query)
   for i in top {
-    let s = similarity(q, vecs[i])
-    print("[" + str(i) + "] sim=" + str(s) + " :: " + docs[i])
+    let pct = int(similarity(q, vecs[i]) * 100.0)
+    print("[" + str(i) + "] sim=" + str(pct) + "% :: " + docs[i])
   }
-
-  // Dimension mismatches are compile-time errors:
-  //   let bad: Vector[4] = ai embed("x", cap)   // E_TYPE_MISMATCH
-  //   similarity(q, bad)                        // E_TYPE_MISMATCH
 }
 
-main(net)
+search("how do Nova programs run?", 2, net)
+
+// Dimension mismatches are compile-time errors, not silent corruption:
+//   ai fn embed4(text: String) -> Vector[4] { prompt(text) }
+//   similarity(embed("a"), embed4("b"))   // E_TYPE_MISMATCH
 
 // EXPECT:
 // query: how do Nova programs run?
-// [1] sim=0.35 :: The NovaVM executes bytecode compiled from Nova source
-// [0] sim=-0.12 :: Nova is a programming language designed for AI agents
+// [2] sim=81% :: Streams move events between Nova services
+// [1] sim=26% :: The NovaVM executes bytecode compiled from Nova source

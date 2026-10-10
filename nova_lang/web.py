@@ -125,10 +125,11 @@ class VRequest:
 
 
 class VResponse:
-    def __init__(self, status, body, content_type="text/plain"):
+    def __init__(self, status, body, content_type="text/plain", headers=None):
         self.status = status
         self.body = body
         self.content_type = content_type
+        self.headers = headers or {}
 
 
 def _json_error(status, message):
@@ -158,6 +159,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(resp.status)
         self.send_header("Content-Type", resp.content_type)
         self.send_header("Content-Length", str(len(data)))
+        for k, v in resp.headers.items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(data)
         ms = (time.monotonic() - t0) * 1000
@@ -194,9 +197,10 @@ def serve_router(interp, router, port, node):
         for prefix, directory in router.statics:
             if path == prefix or path.startswith(prefix.rstrip("/") + "/"):
                 rel = path[len(prefix):].lstrip("/")
-                fpath = os.path.normpath(os.path.join(directory, rel))
-                if not fpath.startswith(os.path.abspath(directory) + os.sep) \
-                        and fpath != os.path.abspath(directory):
+                abs_base = os.path.abspath(directory)
+                fpath = os.path.normpath(os.path.join(abs_base, rel))
+                if not fpath.startswith(abs_base + os.sep) \
+                        and fpath != abs_base:
                     return _json_error(403, "forbidden")
                 if os.path.isdir(fpath):
                     fpath = os.path.join(fpath, "index.html")

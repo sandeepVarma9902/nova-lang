@@ -48,6 +48,32 @@ docs. Everything below is deliberately **not** in v1 — listed here so
   runtime, no network); `examples/dom-counter.html` works on
   double-click; honest subset in `docs/v2-render-dom.md`.
 
+## v2.1 — the application platform (SHIPPED)
+
+- **Nova Boot** ✅: batteries-included web framework in the stdlib
+  (`nova.std.web`): `serve`, router with typed path params
+  (`/users/{id: Int}` → 400/404 automatic), middleware chain
+  (`Option[Response]` short-circuit), JSON binding where Nova types are the
+  schema, static files, `Result[Response, Response]` → HTTP error mapping,
+  automatic request logging. Real HTTP via stdlib `http.server`
+  (single-threaded). `examples/boot-api.nova` + `docs/v2.1-boot.md`.
+- **Database nativity** ✅: `nova db pull --dsn sqlite:///app.db` generates
+  Nova model types + `.nova-schema.json`; typed query builder with
+  check-time column validation (`E_DB_SCHEMA`, best effort). Postgres/MySQL
+  honestly require a driver. `docs/v2.1-database.md`.
+- **AI-data** ✅: `Vector[N]` type + `ai embed` (mock provider, real
+  interface) + `similarity`/`topK` — RAG-native; `examples/rag.nova`.
+  `nova data export` → jsonl fine-tuning datasets; the honest training
+  loop (export → train externally → `nova eval`) in `docs/ai-training.md`.
+  No in-language training claims, ever.
+- **Performance pass** ✅: interpreter ~22% faster (dispatch table,
+  `type() is` fast paths), VM dispatch ~24% faster (table dispatch);
+  numbers + the honest Rust-VM plan in `docs/performance.md`.
+- **`nova test`** ✅: discovers `*_test.nova`, runs `test_*` fns +
+  top-level asserts, per-file reporting.
+- **Showcase apps** ✅: `showcase/` — Nova Blog (Boot + sqlite), Todo
+  full-stack (Boot + `nova dom`), URL shortener (Boot + streams).
+
 ## v2 — the language (careful additions only)
 
 - **Typed context** ✅: `context` declarations with defaults, `provide`
