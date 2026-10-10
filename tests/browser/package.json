@@ -1,0 +1,15 @@
+{
+  "name": "browser",
+  "version": "1.0.0",
+  "description": "`e2e_pyodide.js` loads REAL Pyodide in Node, writes the 25 vendored `website/nova_py/*.py` files via `pyodide.FS`, extracts the EXACT harness from `website/js/nova-live.js`, and runs every runnable snippet from `website/docs/*.html` + `website/js/examples.json`.",
+  "main": "e2e_pyodide.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "pyodide": "^314.0.7"
+  }
+}
