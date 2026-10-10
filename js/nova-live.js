@@ -10,7 +10,6 @@
 (function () {
   "use strict";
 
-  var PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.mjs";
   var TIMEOUT_MS = 25000;
 
   var HARNESS = [
@@ -67,6 +66,23 @@
     return new URL("../nova_py/", new URL("js/nova-live.js", document.baseURI)).toString();
   }
 
+  var CDNS = [
+    { mjs: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.mjs",
+      idx: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/" },
+    { mjs: "https://unpkg.com/pyodide@0.26.4/pyodide.mjs",
+      idx: "https://unpkg.com/pyodide@0.26.4/" }
+  ];
+
+  function tryCdn(i) {
+    if (i >= CDNS.length) return Promise.reject(new Error("Pyodide CDN unreachable"));
+    var cdn = CDNS[i];
+    return withTimeout(import(cdn.mjs), TIMEOUT_MS, "CDN load")
+      .then(function (mod) {
+        return withTimeout(mod.loadPyodide({ indexURL: cdn.idx }), TIMEOUT_MS, "Pyodide init");
+      })
+      .catch(function () { return tryCdn(i + 1); });
+  }
+
   function load() {
     // fast path: file:// can never fetch the sources
     if (location.protocol === "file:") {
@@ -74,8 +90,7 @@
       return Promise.resolve(false);
     }
     var base = novaPyBase();
-    return withTimeout(import(PYODIDE_URL), TIMEOUT_MS, "CDN load")
-      .then(function (mod) { return withTimeout(mod.loadPyodide(), TIMEOUT_MS, "Pyodide init"); })
+    return tryCdn(0)
       .then(function (pd) {
         pyodide = pd;
         return withTimeout(fetch(base + "files.json").then(function (r) {
@@ -113,6 +128,7 @@
       })
       .catch(function (e) {
         pyodide = null;
+        readyPromise = null; // allow a later Run click to retry
         window.NovaLive.lastError = String((e && e.message) || e);
         return false;
       });
