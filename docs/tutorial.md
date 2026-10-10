@@ -261,6 +261,49 @@ nova deploy --target docker   # docker build of the staged image
 
 Full walkthrough: [deployment.md](./deployment.md).
 
+## (i) Naming conventions — 2 minutes
+
+Nova takes its naming from the two languages it fuses: types look like
+Java, functions look like JavaScript. One rule per kind of name — no
+code-review debates.
+
+| Name kind | Style | Example |
+|---|---|---|
+| Classes, interfaces, enums, data classes | PascalCase | `User`, `HttpRequest` |
+| Components | PascalCase | `UserCard`, `Counter` |
+| Functions, methods | camelCase | `getUser`, `calculateTotal` |
+| Variables, parameters | camelCase | `userName`, `retryCount` |
+| Module-level constants | SCREAMING_SNAKE_CASE | `MAX_RETRIES`, `DEFAULT_PORT` |
+| Type parameters | single capital letter | `T`, `E`, `K`, `V` |
+| Module files | snake_case | `helpers.nova` → `import helpers` |
+| Test files | `*_test.nova` | `user_test.nova` (found by `nova test`) |
+
+```nova
+// ✅ Do
+class UserService { ... }
+component UserCard(user: User) { ... }
+fn getUser(id: Int) -> Option[User] { ... }
+let retryCount = 0
+const MAX_RETRIES = 3
+
+// ❌ Don't
+class userService { ... }      // types are PascalCase
+fn GetUser(id: Int) { ... }    // functions are camelCase
+let MAX = 3                    // screaming case is for constants only
+```
+
+Three special rules:
+
+1. **Private is `_`-prefixed** — `_helper`, `_CACHE` are module-private by
+   convention, like Python.
+2. **View tags are CamelCase** — inside a component view, `<UserCard>`
+   works; `<user-card>` is a compile error. The parser enforces this one.
+3. **Acronyms stay readable** — `HttpRequest`, not `HTTPRequest`;
+   `userId`, not `userID`. Treat an acronym like a word.
+
+`nova fmt` fixes your whitespace, not your names — naming is a human
+(and code-review) job. The full normative list lives in SPEC §1.
+
 ---
 
 ## Where next

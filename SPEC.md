@@ -25,6 +25,15 @@ story (NovaVM) is specified in §18; v2 compiles to it.
 - Integer literals are decimal; range-checked to signed 64-bit
   (`E_INT_RANGE`). Float literals contain `.`. String literals are
   `"..."` with `\` escapes.
+- Naming conventions (normative style; `nova fmt` does not enforce these):
+  types (classes, interfaces, enums, data classes, components) are
+  `PascalCase`; functions, methods, variables, parameters are `camelCase`;
+  module-level constants are `SCREAMING_SNAKE_CASE`; type parameters are a
+  single capital letter (`T`, `E`, `K`, `V`); module files are `snake_case`
+  (`helpers.nova` imports as `import helpers`); test files are `*_test.nova`.
+  A leading `_` marks a module-private name (`_helper`). View tags must be
+  `CamelCase` (`<UserCard>`, never `<user-card>` — enforced by the parser,
+  §8). Acronyms are treated as words: `HttpRequest`, `userId`.
 
 ## 2. Type system
 
